@@ -1,33 +1,30 @@
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import OneHotEncoder
-from sklearn.model_selection import LeaveOneOut
-from functools import reduce
+import pickle
 from cmath import sqrt
+from functools import reduce
 
-import pandas as pd
+import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
+import seaborn as sns
+import statsmodels.api as sm
+from sklearn import tree
+from sklearn.decomposition import PCA
 # from keras import Sequential
 # from keras.layers import Dense
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import LinearRegression
-from sklearn import tree
-from sklearn.model_selection import train_test_split, LeaveOneOut, KFold
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.feature_selection import RFE, SelectFromModel
-import matplotlib.pyplot as plt
-import seaborn as sns
-import statsmodels.api as sm
-import pickle
-import scipy.stats
-# import tensorflow as tf
-
-from sklearn.svm import SVR
-from nltk.tokenize import sent_tokenize, word_tokenize
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.model_selection import LeaveOneOut
 from sklearn.preprocessing import StandardScaler
+from sklearn.svm import SVR
+
+# import tensorflow as tf
 
 result_list = {"test": [], "result": []}
 rmse_list = {"rmse": [], "MAE": [], "pearson": [], "r2": []}
+result_csv = ''
 
 
 def segmented_output():
@@ -114,102 +111,24 @@ def save_result(name, num):
     writer.save()
 
 
-def SVM_classification(x_train, x_test, y_train, y_test):
-    X = x_train
-    y = y_train.reshape(-1, 1)
-    # 3 Feature Scaling
-    from sklearn.preprocessing import StandardScaler
-    sc_X = StandardScaler(with_mean=False)
-    sc_y = StandardScaler()
-    X = sc_X.fit_transform(X)
-    y = sc_y.fit_transform(y)
+def Regression(x_train, x_test, y_train, y_test, sc_y, regressor):
+    regressor.fit(x_train, y_train)
 
-    # 4 Fitting the Support Vector Regression Model to the dataset
-    # Create your support vector regressor here
-    # df_train = df_train.iloc[:, 1:]
-    # print("GP model")
-    # import sklearn.gaussian_process as gp
-    # most important SVR parameter is Kernel type. It can be #linear,polynomial or gaussian SVR. We have a non-linear condition #so we can select polynomial or gaussian but here we select RBF(a #gaussian type) kernel.
-    # regressor = SVR(kernel='rbf', C=100, gamma=0.1, epsilon=.1)
-    regressor = SVR(kernel='poly', C=100, gamma='auto', degree=3, epsilon=.1, coef0=1)
-    regressor.fit(X, y)
-    # regressor = tree.DecisionTreeRegressor(max_leaf_nodes=20)
-    # regressor.fit(X, y)
-    # kernel = gp.kernels.ConstantKernel(1.0, (1e-1, 1e3)) * gp.kernels.RBF(10.0, (1e-3, 1e3))
-    #
-    # regressor = gp.GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=10, alpha=0.1, normalize_y=True)
-    # regressor.fit(X, y)
-    # params = model.kernel_.get_params()
-    # print("gp model fit")
-    # 5 Predicting a new result
-    # y_pred, std = regressor.predict(x_test, return_std=True)
-    # print("GP model pred")
-    # x_test=x_test.fillna(x_test.mean())
-    # print(x_test)
-    # y_pred = regressor.predict(x_test)
-    y_pred = sc_y.inverse_transform((regressor.predict(sc_X.transform(x_test))))
+    y_pred = sc_y.inverse_transform((regressor.predict(x_test)))
     test_rmse = sqrt(mean_squared_error(y_test * 30, y_pred * 30))
     test_MAE = mean_absolute_error(y_test * 30, y_pred * 30)
-    # pearson=scipy.stats.pearsonr(y_test * 30, y_pred * 30)
+    # pearson = scipy.stats.pearsonr(y_test * 30, y_pred * 30)
     pearson = 0
     r2 = r2_score(y_test * 30, y_pred * 30)
-    for val in y_pred:
-        result_list["result"].append(val * 30)
-    for val in y_test:
-        result_list["test"].append(val * 30)
-        # print("MAE")
-        # print(test_MAE)
-
-    return test_rmse, test_MAE, pearson, r2
+    return test_rmse, test_MAE, pearson, r2, list(zip(y_test, y_pred))
 
 
-def SVR_regression(x_train, x_test, y_train, y_test):
-    X = x_train
-    y = y_train.reshape(-1, 1)
-    # 3 Feature Scaling
-    from sklearn.preprocessing import StandardScaler
-    sc_X = StandardScaler(with_mean=False)
-    sc_y = StandardScaler()
-    X = sc_X.fit_transform(X)
-    y = sc_y.fit_transform(y)
+def Classifcation(x_train, x_test, y_train, y_test, sc_y, classifier):
+    classifier.fit(x_train, y_train)
 
-    # 4 Fitting the Support Vector Regression Model to the dataset
-    # Create your support vector regressor here
-    # df_train = df_train.iloc[:, 1:]
-    # print("GP model")
-    # import sklearn.gaussian_process as gp
-    # most important SVR parameter is Kernel type. It can be #linear,polynomial or gaussian SVR. We have a non-linear condition #so we can select polynomial or gaussian but here we select RBF(a #gaussian type) kernel.
-    # regressor = SVR(kernel='rbf', C=100, gamma=0.1, epsilon=.1)
-    regressor = SVR(kernel='poly', C=100, gamma='auto', degree=3, epsilon=.1, coef0=1)
-    regressor.fit(X, y)
-    # regressor = tree.DecisionTreeRegressor(max_leaf_nodes=20)
-    # regressor.fit(X, y)
-    # kernel = gp.kernels.ConstantKernel(1.0, (1e-1, 1e3)) * gp.kernels.RBF(10.0, (1e-3, 1e3))
-    #
-    # regressor = gp.GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=10, alpha=0.1, normalize_y=True)
-    # regressor.fit(X, y)
-    # params = model.kernel_.get_params()
-    # print("gp model fit")
-    # 5 Predicting a new result
-    # y_pred, std = regressor.predict(x_test, return_std=True)
-    # print("GP model pred")
-    # x_test=x_test.fillna(x_test.mean())
-    # print(x_test)
-    # y_pred = regressor.predict(x_test)
-    y_pred = sc_y.inverse_transform((regressor.predict(sc_X.transform(x_test))))
-    test_rmse = sqrt(mean_squared_error(y_test * 30, y_pred * 30))
-    test_MAE = mean_absolute_error(y_test * 30, y_pred * 30)
-    # pearson=scipy.stats.pearsonr(y_test * 30, y_pred * 30)
-    pearson = 0
-    r2 = r2_score(y_test * 30, y_pred * 30)
-    for val in y_pred:
-        result_list["result"].append(val * 30)
-    for val in y_test:
-        result_list["test"].append(val * 30)
-        # print("MAE")
-        # print(test_MAE)
+    y_pred = sc_y.inverse_transform((classifier.predict(x_test)))
 
-    return test_rmse, test_MAE, pearson, r2
+    return list(zip(y_test, y_pred))
 
 
 # plot vovabulary feature
@@ -474,7 +393,7 @@ def linguistic_model():
     x_test = x_test.loc[:, df_feature_column]
 
     save_feature(df_feature, "important_audio_feature")
-    rmse, mae, pearson, r2 = SVR_regression(x_train, x_test, y_train, y_tests)
+    rmse, mae, pearson, r2, result = SVR_regression(x_train, x_test, y_train, y_tests)
     print("rmse")
     print(rmse)
     print("MAE")
@@ -529,32 +448,72 @@ def get_data():
                         'n_long']], silence, embeddings[['speaker'] + feature_set]])
     df = df[~df.isin([np.nan, np.inf, -np.inf]).any(1)]
     df.to_csv('training_data.csv', index=False)
+    feature_set = ['mean_silence_duration',
+                   'mean_speech_duration',
+                   'silence_rate',
+                   'silence_count_ratio',
+                   'silence_to_speech_ratio',
+                   'mean_silence_count',
+                   'n_short',
+                   'n_long'] + feature_set
     return feature_set, df
+
+
+def pca(X, Y, sc_y, num_features=157):
+    sc_X = StandardScaler(with_mean=False)
+    X = sc_X.fit_transform(X)
+    Y = sc_y.fit_transform(Y.reshape(-1, 1))
+    pca = PCA(n_components=num_features)
+    principalComponents_tr = pca.fit_transform(X)
+    return principalComponents_tr, Y
+
+
+import sklearn.gaussian_process as gp
 
 
 def acoustic_model2():
     feature_set, df = get_data()
     Y_mmse = df.mmse.values / 30
-    # Y_dx = df.dx.values
-    X = df[['mean_silence_duration',
-            'mean_speech_duration',
-            'silence_rate',
-            'silence_count_ratio',
-            'silence_to_speech_ratio',
-            'mean_silence_count',
-            'n_short',
-            'n_long'] + feature_set].to_numpy()
+    Y_dx = pd.factorize(df.dx)[0]
+    X = df[feature_set].to_numpy()
     loo = LeaveOneOut()
-    loo.get_n_splits(X)
+    sc_y = StandardScaler()
+    X, Y_mmse = pca(X, Y_mmse, sc_y)
+    result_svr_all = []
+    result_dt_all = []
+    result_gp_all = []
     for train_index, test_index in loo.split(X):
-        print("TRAIN:", train_index, "TEST:", test_index)
+        # print("TRAIN:", train_index, "TEST:", test_index)
         X_train, X_test = X[train_index], X[test_index]
-        y_train, y_test = Y_mmse[train_index], Y_mmse[test_index]
-        rmse, mae, pearson, r2 = SVR_regression(X_train, X_test, y_train, y_test)
-        print("rmse", rmse)
-        print("MAE", mae)
-        print("pearson", pearson)
-        print("R2", r2)
+        y_train_mmse, y_test_mmse = Y_mmse[train_index], Y_mmse[test_index]
+        y_train_dx, y_test_dx = Y_dx[train_index], Y_dx[test_index]
+        rmse, mae, pearson, r2, result_svr = Regression(X_train, X_test, y_train_mmse, y_test_mmse, sc_y,
+                                                        SVR(kernel='poly',
+                                                            C=100,
+                                                            gamma='auto',
+                                                            degree=3,
+                                                            epsilon=.1,
+                                                            coef0=1))
+        result_svr_all += result_svr
+        rmse, mae, pearson, r2, result_dt = Regression(X_train, X_test, y_train_mmse, y_test_mmse, sc_y,
+                                                       tree.DecisionTreeRegressor(max_leaf_nodes=20))
+        result_dt_all += result_dt
+        rmse, mae, pearson, r2, result_gp = Regression(X_train, X_test, y_train_mmse, y_test_mmse, sc_y,
+                                                       gp.GaussianProcessRegressor(
+                                                           kernel=gp.kernels.ConstantKernel(1.0, (
+                                                               1e-1, 1e3)) * gp.kernels.RBF(10.0, (1e-3, 1e3)),
+                                                           n_restarts_optimizer=10,
+                                                           alpha=0.1,
+                                                           normalize_y=True))
+        # result_svc = Classifcation(X_train, X_test, y_train_dx, y_test_dx, sc_y, SVC(gamma='auto'))
+        result_gp_all += result_gp
+    print('SVR')
+    [print(res) for res in result_svr_all]
+    print('DT')
+    [print(res) for res in result_dt_all]
+    print('GP')
+    [print(res) for res in result_gp_all]
+
     # x_train, x_test, y_train, y_test = train_test_split(X, Y_mmse, test_size=0.33, random_state=42)
     # save_result("adress_fs_audio_poly", 1)
     # save_result("adress_fs_audio_2_poly", 2)
@@ -579,7 +538,7 @@ def acoustic_model():
     x_train = df.iloc[:, 4:]
     x_test = df_test.iloc[:, 2:]
 
-    rmse, mae, pearson, r2 = SVR_regression(x_train, x_test, y_train, y_test)
+    rmse, mae, pearson, r2, result = SVR_regression(x_train, x_test, y_train, y_test)
 
     rmse_list["rmse"].append(rmse)
     rmse_list["MAE"].append(mae)
