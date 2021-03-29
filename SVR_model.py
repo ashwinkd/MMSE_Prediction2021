@@ -20,9 +20,8 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import LeaveOneOut
 from sklearn.preprocessing import StandardScaler
-from sklearn.svm import SVR
-
 # import tensorflow as tf
+from sklearn.svm import SVR
 
 result_list = {"test": [], "result": []}
 rmse_list = {"rmse": [], "MAE": [], "pearson": [], "r2": []}
@@ -442,12 +441,12 @@ def _get_scores(y_pred, y_test):
     return test_rmse, test_MAE, pearson, r2
 
 
-def Regression(x_train, x_test, y_train, y_test, sc_y, regressor):
+def Regression(x_train, x_test, y_train, sc_y, regressor):
     regressor.fit(x_train, y_train)
 
     y_pred = sc_y.inverse_transform((regressor.predict(x_test)))
 
-    return list(zip(y_test, y_pred))
+    return y_pred.flatten().tolist()
 
 
 def Classifcation(x_train, x_test, y_train, y_test, sc_y, classifier):
@@ -466,23 +465,29 @@ def get_pause(x, index=0):
         pass
 
 
-def get_data():
-    silence = pd.read_csv('./speaker_data_acoustic_silence_features.csv', usecols=['speaker',
-                                                                                   'mmse',
-                                                                                   'dx',
-                                                                                   'mean_silence_duration',
-                                                                                   'mean_speech_duration',
-                                                                                   'silence_rate',
-                                                                                   'silence_count_ratio',
-                                                                                   'silence_to_speech_ratio',
-                                                                                   'mean_silence_count'])
-    pause = pd.read_csv('./speaker_data_silence.csv', usecols=['speaker',
-                                                               'n_short_long_pause'])
+def get_data(silence_file='./speaker_data_acoustic_silence_features.csv',
+             pause_file='./speaker_data_silence.csv',
+             embeddings_file='speaker_file_silence_embedding.pkl'):
+    silence_columns = ['speaker',
+                       'mean_silence_duration',
+                       'mean_speech_duration',
+                       'silence_rate',
+                       'silence_count_ratio',
+                       'silence_to_speech_ratio',
+                       'mean_silence_count']
+    if 'test' not in silence_file:
+        silence_columns += ['mmse', 'dx']
+        filename = 'training_data.csv'
+    else:
+        filename = 'testing_data.csv'
+    silence = pd.read_csv(silence_file, usecols=silence_columns)
+    pause = pd.read_csv(pause_file, usecols=['speaker',
+                                             'n_short_long_pause'])
     pause['n_short'] = pause['n_short_long_pause'].apply(lambda x: get_pause(x))
     pause['n_long'] = pause['n_short_long_pause'].apply(lambda x: get_pause(x, index=1))
-    with open('speaker_file_silence_embedding.pkl', "rb") as input_file:
+    with open(embeddings_file, "rb") as input_file:
         embeddings = pickle.load(input_file)[['speaker', 'embedding_new']]
-    embeddings['embedding_new'] = embeddings['embedding_new'].apply(lambda x: x[0])  # .flatten().tolist())
+    embeddings['embedding_new'] = embeddings['embedding_new'].apply(lambda x: x[0] if x else x)  # .flatten().tolist())
     feature_set = ['f{}'.format(i) for i in range(1024)]
     embeddings[feature_set] = pd.DataFrame(embeddings.embedding_new.tolist(),
                                            index=embeddings.index)
@@ -491,7 +496,7 @@ def get_data():
                         'n_short',
                         'n_long']], silence, embeddings[['speaker'] + feature_set]])
     df = df[~df.isin([np.nan, np.inf, -np.inf]).any(1)]
-    df.to_csv('training_data.csv', index=False)
+    df.to_csv(filename, index=False)
     feature_set = ['mean_silence_duration',
                    'mean_speech_duration',
                    'silence_rate',
@@ -503,11 +508,13 @@ def get_data():
     return feature_set, df
 
 
-def pca(X, Y, sc_y, num_features=157):
+def pca(X, Y=None, sc_y=None, num_features=70):
     sc_X = StandardScaler(with_mean=False)
     pca = PCA(n_components=num_features)
     X = pca.fit_transform(X)
     X = sc_X.fit_transform(X)
+    if Y is None:
+        return X
     Y = sc_y.fit_transform(Y.reshape(-1, 1))
     return X, Y
 
@@ -522,32 +529,38 @@ def acoustic_model2():
     X, Y_mmse = pca(X, Y_mmse, sc_y)
     svr = SVR(kernel='poly', C=100, gamma='auto', degree=3, epsilon=.1, coef0=1)
     dt = tree.DecisionTreeRegressor(max_leaf_nodes=20)
-
     gpr = gp.GaussianProcessRegressor(
         kernel=gp.kernels.ConstantKernel(1.0, (
             1e-1, 1e3)) * gp.kernels.RBF(10.0, (1e-3, 1e3)),
         n_restarts_optimizer=10,
         alpha=0.1,
         normalize_y=True)
-    result_svr_all = []
-    result_dt_all = []
-    result_gp_all = []
+    Y_PRED = {'svr': [], 'dt': [], 'gp': []}
+    Y_TEST = []
     for train_index, test_index in loo.split(X):
         # print("TRAIN:", train_index, "TEST:", test_index)
         X_train, X_test = X[train_index], X[test_index]
         y_train_mmse, y_test_mmse = Y_mmse[train_index], Y_mmse[test_index]
         y_test_mmse = y_test_mmse.flatten()
+        Y_TEST += y_test_mmse.tolist()
         y_train_dx, y_test_dx = Y_dx[train_index], Y_dx[test_index]
-        result_svr_all += Regression(X_train, X_test, y_train_mmse, y_test_mmse, sc_y, svr)
-        result_dt_all += Regression(X_train, X_test, y_train_mmse, y_test_mmse, sc_y, dt)
-        result_gp_all += Regression(X_train, X_test, y_train_mmse, y_test_mmse, sc_y, gpr)
+        Y_PRED['svr'] += Regression(X_train, X_test, y_train_mmse, sc_y, svr)
+        Y_PRED['dt'] += Regression(X_train, X_test, y_train_mmse, sc_y, dt)
+        Y_PRED['gp'] += Regression(X_train, X_test, y_train_mmse, sc_y, gpr)
         # result_svc = Classifcation(X_train, X_test, y_train_dx, y_test_dx, sc_y, SVC(gamma='auto'))
-    print('SVR')
-    print(_get_scores([res[0] for res in result_svr_all], [res[1] for res in result_svr_all]))
-    print('DT')
-    print(_get_scores([res[0] for res in result_dt_all], [res[1] for res in result_dt_all]))
-    print('GP')
-    print(_get_scores([res[0] for res in result_gp_all], [res[1] for res in result_gp_all]))
+    for key in Y_PRED:
+        print(key)
+        y_pred = Y_PRED[key]
+        print(_get_scores(y_pred, Y_TEST))
+        for target, pred in list(zip(Y_TEST, y_pred)):
+            print(target, pred)
+    feature_set, df_test = get_data('speaker_data_features_test.csv', 'speaker_data_features_test.csv',
+                                    'speaker_file_embeddings_test.pkl')
+    X_test = df_test[feature_set].to_numpy()
+    X_test = pca(X_test)
+    y_test_pred_svr = sc_y.inverse_transform(svr.predict(X_test))
+    y_test_pred_dt = sc_y.inverse_transform(dt.predict(X_test))
+    y_test_pred_gp = sc_y.inverse_transform(gpr.predict(X_test))
 
     # x_train, x_test, y_train, y_test = train_test_split(X, Y_mmse, test_size=0.33, random_state=42)
     # save_result("adress_fs_audio_poly", 1)
