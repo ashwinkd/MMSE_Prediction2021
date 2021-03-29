@@ -467,44 +467,57 @@ def get_pause(x, index=0):
 
 def get_data(silence_file='./speaker_data_acoustic_silence_features.csv',
              pause_file='./speaker_data_silence.csv',
-             embeddings_file='speaker_file_silence_embedding.pkl'):
-    silence_columns = ['speaker',
-                       'mean_silence_duration',
-                       'mean_speech_duration',
-                       'silence_rate',
-                       'silence_count_ratio',
-                       'silence_to_speech_ratio',
-                       'mean_silence_count']
-    if 'test' not in silence_file:
-        silence_columns += ['mmse', 'dx']
-        filename = 'training_data.csv'
-    else:
-        filename = 'testing_data.csv'
-    silence = pd.read_csv(silence_file, usecols=silence_columns)
-    pause = pd.read_csv(pause_file, usecols=['speaker',
-                                             'n_short_long_pause'])
-    pause['n_short'] = pause['n_short_long_pause'].apply(lambda x: get_pause(x))
-    pause['n_long'] = pause['n_short_long_pause'].apply(lambda x: get_pause(x, index=1))
+             embeddings_file='speaker_file_silence_embedding.pkl',
+             embedding_only=False):
     with open(embeddings_file, "rb") as input_file:
-        embeddings = pickle.load(input_file)[['speaker', 'embedding_new']]
+        embeddings = pickle.load(input_file)
+        embeddings = embeddings[['speaker', 'embedding_new']]
     embeddings['embedding_new'] = embeddings['embedding_new'].apply(lambda x: x[0] if x else x)  # .flatten().tolist())
     feature_set = ['f{}'.format(i) for i in range(1024)]
     embeddings[feature_set] = pd.DataFrame(embeddings.embedding_new.tolist(),
                                            index=embeddings.index)
-    df = reduce(lambda left, right: pd.merge(left, right, on='speaker'),
-                [pause[['speaker',
-                        'n_short',
-                        'n_long']], silence, embeddings[['speaker'] + feature_set]])
+    if 'test' in embeddings_file:
+        filename = 'testing_data'
+    else:
+        filename = 'training_data'
+        with open(embeddings_file, "rb") as input_file:
+            targets = pickle.load(input_file)
+            targets = targets[['speaker', 'mmse', 'dx']]
+        embeddings = reduce(lambda left, right: pd.merge(left, right, on='speaker'), [targets,
+                                                                                      embeddings[
+                                                                                          ['speaker'] + feature_set]])
+    if not embedding_only:
+        silence_columns = ['speaker',
+                           'mean_silence_duration',
+                           'mean_speech_duration',
+                           'silence_rate',
+                           'silence_count_ratio',
+                           'silence_to_speech_ratio',
+                           'mean_silence_count']
+        filename += '_with_silence_features.pkl'
+        silence = pd.read_csv(silence_file, usecols=silence_columns)
+        pause = pd.read_csv(pause_file, usecols=['speaker',
+                                                 'n_short_long_pause'])
+        pause['n_short'] = pause['n_short_long_pause'].apply(lambda x: get_pause(x))
+        pause['n_long'] = pause['n_short_long_pause'].apply(lambda x: get_pause(x, index=1))
+        embeddings = embeddings[feature_set + ['speaker'] + ([] if 'test' in embeddings_file else ['mmse', 'dx'])]
+        df = reduce(lambda left, right: pd.merge(left, right, on='speaker'), [pause[['speaker', 'n_short', 'n_long']],
+                                                                              silence,
+                                                                              embeddings]
+                    )
+        feature_set = ['mean_silence_duration',
+                       'mean_speech_duration',
+                       'silence_rate',
+                       'silence_count_ratio',
+                       'silence_to_speech_ratio',
+                       'mean_silence_count',
+                       'n_short',
+                       'n_long'] + feature_set
+    else:
+        filename += '_embedings_only.pkl'
+        df = embeddings
     df = df[~df.isin([np.nan, np.inf, -np.inf]).any(1)]
-    df.to_csv(filename, index=False)
-    feature_set = ['mean_silence_duration',
-                   'mean_speech_duration',
-                   'silence_rate',
-                   'silence_count_ratio',
-                   'silence_to_speech_ratio',
-                   'mean_silence_count',
-                   'n_short',
-                   'n_long'] + feature_set
+    df.to_pickle(filename)
     return feature_set, df
 
 
@@ -519,8 +532,8 @@ def pca(X, Y=None, sc_y=None, num_features=70):
     return X, Y
 
 
-def acoustic_model2():
-    feature_set, df = get_data()
+def acoustic_model2(embedding_only=False):
+    feature_set, df = get_data(embedding_only=embedding_only)
     Y_mmse = df.mmse.values / 30
     Y_dx = pd.factorize(df.dx)[0]
     X = df[feature_set].to_numpy()
@@ -555,7 +568,7 @@ def acoustic_model2():
         for target, pred in list(zip(Y_TEST, y_pred)):
             print(target, pred)
     feature_set, df_test = get_data('speaker_data_features_test.csv', 'speaker_data_features_test.csv',
-                                    'speaker_file_embeddings_test.pkl')
+                                    'speaker_file_embeddings_test.pkl', embedding_only)
     X_test = df_test[feature_set].to_numpy()
     X_test = pca(X_test)
     y_test_pred_svr = sc_y.inverse_transform(svr.predict(X_test))
@@ -571,6 +584,7 @@ def acoustic_model2():
 
 
 # linguistic_model()
+# acoustic_model2(embedding_only=True)
 acoustic_model2()
 
 # kf = KFold(n_splits=5,shuffle=True)
