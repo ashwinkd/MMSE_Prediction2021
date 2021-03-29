@@ -584,7 +584,7 @@ def acoustic_model2(embedding_only=False):
 
 
 # linguistic_model()
-# acoustic_model2(embedding_only=True)
+acoustic_model2(embedding_only=True)
 acoustic_model2()
 
 # kf = KFold(n_splits=5,shuffle=True)
