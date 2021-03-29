@@ -461,11 +461,11 @@ def get_data():
 
 def pca(X, Y, sc_y, num_features=157):
     sc_X = StandardScaler(with_mean=False)
+    pca = PCA(n_components=num_features)
+    X = pca.fit_transform(X)
     X = sc_X.fit_transform(X)
     Y = sc_y.fit_transform(Y.reshape(-1, 1))
-    pca = PCA(n_components=num_features)
-    principalComponents_tr = pca.fit_transform(X)
-    return principalComponents_tr, Y
+    return X, Y
 
 
 import sklearn.gaussian_process as gp
