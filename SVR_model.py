@@ -543,17 +543,19 @@ def acoustic_model2():
             'silence_to_speech_ratio',
             'mean_silence_count',
             'n_short',
-            'n_long'] + feature_set]
-
-    x_train, x_test, y_train, y_test = train_test_split(X, Y_mmse, test_size=0.33, random_state=42)
-
-    rmse, mae, pearson, r2 = SVR_regression(x_train, x_test, y_train, y_test)
-
-    print("rmse", rmse)
-    print("MAE", mae)
-    print("pearson", pearson)
-    print("R2", r2)
-
+            'n_long'] + feature_set].to_numpy()
+    loo = LeaveOneOut()
+    loo.get_n_splits(X)
+    for train_index, test_index in loo.split(X):
+        print("TRAIN:", train_index, "TEST:", test_index)
+        X_train, X_test = X[train_index], X[test_index]
+        y_train, y_test = Y_mmse[train_index], Y_mmse[test_index]
+        rmse, mae, pearson, r2 = SVR_regression(X_train, X_test, y_train, y_test)
+        print("rmse", rmse)
+        print("MAE", mae)
+        print("pearson", pearson)
+        print("R2", r2)
+    # x_train, x_test, y_train, y_test = train_test_split(X, Y_mmse, test_size=0.33, random_state=42)
     # save_result("adress_fs_audio_poly", 1)
     # save_result("adress_fs_audio_2_poly", 2)
     # # prepare final rmse score on transcript level averaging rmse value for each segment of the audio for
