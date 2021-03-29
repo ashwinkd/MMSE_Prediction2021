@@ -1,4 +1,5 @@
 import pickle
+from ast import literal_eval
 from cmath import sqrt
 from functools import reduce
 
@@ -6,6 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+import sklearn.gaussian_process as gp
 import statsmodels.api as sm
 from sklearn import tree
 from sklearn.decomposition import PCA
@@ -109,26 +111,6 @@ def save_result(name, num):
 
     df.to_excel(writer, sheet_name='Sheet1', columns=cols)
     writer.save()
-
-
-def Regression(x_train, x_test, y_train, y_test, sc_y, regressor):
-    regressor.fit(x_train, y_train)
-
-    y_pred = sc_y.inverse_transform((regressor.predict(x_test)))
-    test_rmse = sqrt(mean_squared_error(y_test * 30, y_pred * 30))
-    test_MAE = mean_absolute_error(y_test * 30, y_pred * 30)
-    # pearson = scipy.stats.pearsonr(y_test * 30, y_pred * 30)
-    pearson = 0
-    r2 = r2_score(y_test * 30, y_pred * 30)
-    return test_rmse, test_MAE, pearson, r2, list(zip(y_test, y_pred))
-
-
-def Classifcation(x_train, x_test, y_train, y_test, sc_y, classifier):
-    classifier.fit(x_train, y_train)
-
-    y_pred = sc_y.inverse_transform((classifier.predict(x_test)))
-
-    return list(zip(y_test, y_pred))
 
 
 # plot vovabulary feature
@@ -411,7 +393,69 @@ def linguistic_model():
     save_result("adress_fs_2_poly", 2)
 
 
-from ast import literal_eval
+def acoustic_model():
+    df = pd.read_excel('data/adress_acoustic_train.xlsx', sheet_name='Sheet1')
+    # cc_meta = pd.read_csv("data/ADReSS/meta_all.txt", sep=';')
+
+    # df_audio = pd.read_excel('data/acoustic_feature_adress.xlsx', sheet_name='Sheet2')
+    # df_feature = pd.read_excel('data/important_audio_feature.xlsx', sheet_name='Sheet1')
+    # df_feature_column=list(df_feature.loc[:,"feature_no"])
+
+    df_test = pd.read_excel('data/adress_acoustic_test.xlsx', sheet_name='Sheet1')
+
+    y_train = df.mmse.values / 30
+    y_test = df_test.mmse.values / 30
+
+    x_train = df.iloc[:, 4:]
+    x_test = df_test.iloc[:, 2:]
+
+    rmse, mae, pearson, r2, result = SVR_regression(x_train, x_test, y_train, y_test)
+
+    rmse_list["rmse"].append(rmse)
+    rmse_list["MAE"].append(mae)
+    rmse_list["pearson"].append(pearson)
+    rmse_list["r2"].append(r2)
+
+    print("rmse")
+    print(rmse)
+    print("MAE")
+    print(mae)
+    print("pearson")
+    print(pearson)
+    print("R2")
+    print(r2)
+
+    save_result("adress_fs_audio_poly", 1)
+    save_result("adress_fs_audio_2_poly", 2)
+    # prepare final rmse score on transcript level averaging rmse value for each segment of the audio for
+    # the transcript
+    voting()
+
+
+def _get_scores(y_pred, y_test):
+    test_rmse = sqrt(mean_squared_error(y_test * 30, y_pred * 30))
+    test_MAE = mean_absolute_error(y_test * 30, y_pred * 30)
+    # pearson = scipy.stats.pearsonr(y_test * 30, y_pred * 30)
+    pearson = 0
+    r2 = r2_score(y_test * 30, y_pred * 30)
+
+    return test_rmse, test_MAE, pearson, r2
+
+
+def Regression(x_train, x_test, y_train, y_test, sc_y, regressor):
+    regressor.fit(x_train, y_train)
+
+    y_pred = sc_y.inverse_transform((regressor.predict(x_test)))
+
+    return list(zip(y_test, y_pred))
+
+
+def Classifcation(x_train, x_test, y_train, y_test, sc_y, classifier):
+    classifier.fit(x_train, y_train)
+
+    y_pred = sc_y.inverse_transform((classifier.predict(x_test)))
+
+    return list(zip(y_test, y_pred))
 
 
 def get_pause(x, index=0):
@@ -468,9 +512,6 @@ def pca(X, Y, sc_y, num_features=157):
     return X, Y
 
 
-import sklearn.gaussian_process as gp
-
-
 def acoustic_model2():
     feature_set, df = get_data()
     Y_mmse = df.mmse.values / 30
@@ -479,6 +520,15 @@ def acoustic_model2():
     loo = LeaveOneOut()
     sc_y = StandardScaler()
     X, Y_mmse = pca(X, Y_mmse, sc_y)
+    svr = SVR(kernel='poly', C=100, gamma='auto', degree=3, epsilon=.1, coef0=1)
+    dt = tree.DecisionTreeRegressor(max_leaf_nodes=20)
+
+    gpr = gp.GaussianProcessRegressor(
+        kernel=gp.kernels.ConstantKernel(1.0, (
+            1e-1, 1e3)) * gp.kernels.RBF(10.0, (1e-3, 1e3)),
+        n_restarts_optimizer=10,
+        alpha=0.1,
+        normalize_y=True)
     result_svr_all = []
     result_dt_all = []
     result_gp_all = []
@@ -486,33 +536,18 @@ def acoustic_model2():
         # print("TRAIN:", train_index, "TEST:", test_index)
         X_train, X_test = X[train_index], X[test_index]
         y_train_mmse, y_test_mmse = Y_mmse[train_index], Y_mmse[test_index]
+        y_test_mmse = y_test_mmse.flatten()
         y_train_dx, y_test_dx = Y_dx[train_index], Y_dx[test_index]
-        rmse, mae, pearson, r2, result_svr = Regression(X_train, X_test, y_train_mmse, y_test_mmse, sc_y,
-                                                        SVR(kernel='poly',
-                                                            C=100,
-                                                            gamma='auto',
-                                                            degree=3,
-                                                            epsilon=.1,
-                                                            coef0=1))
-        result_svr_all += result_svr
-        rmse, mae, pearson, r2, result_dt = Regression(X_train, X_test, y_train_mmse, y_test_mmse, sc_y,
-                                                       tree.DecisionTreeRegressor(max_leaf_nodes=20))
-        result_dt_all += result_dt
-        rmse, mae, pearson, r2, result_gp = Regression(X_train, X_test, y_train_mmse, y_test_mmse, sc_y,
-                                                       gp.GaussianProcessRegressor(
-                                                           kernel=gp.kernels.ConstantKernel(1.0, (
-                                                               1e-1, 1e3)) * gp.kernels.RBF(10.0, (1e-3, 1e3)),
-                                                           n_restarts_optimizer=10,
-                                                           alpha=0.1,
-                                                           normalize_y=True))
+        result_svr_all += Regression(X_train, X_test, y_train_mmse, y_test_mmse, sc_y, svr)
+        result_dt_all += Regression(X_train, X_test, y_train_mmse, y_test_mmse, sc_y, dt)
+        result_gp_all += Regression(X_train, X_test, y_train_mmse, y_test_mmse, sc_y, gpr)
         # result_svc = Classifcation(X_train, X_test, y_train_dx, y_test_dx, sc_y, SVC(gamma='auto'))
-        result_gp_all += result_gp
     print('SVR')
-    [print(res) for res in result_svr_all]
+    print(_get_scores([res[0] for res in result_svr_all], [res[1] for res in result_svr_all]))
     print('DT')
-    [print(res) for res in result_dt_all]
+    print(_get_scores([res[0] for res in result_dt_all], [res[1] for res in result_dt_all]))
     print('GP')
-    [print(res) for res in result_gp_all]
+    print(_get_scores([res[0] for res in result_gp_all], [res[1] for res in result_gp_all]))
 
     # x_train, x_test, y_train, y_test = train_test_split(X, Y_mmse, test_size=0.33, random_state=42)
     # save_result("adress_fs_audio_poly", 1)
@@ -520,45 +555,6 @@ def acoustic_model2():
     # # prepare final rmse score on transcript level averaging rmse value for each segment of the audio for
     # # the transcript
     # voting()
-
-
-def acoustic_model():
-    df = pd.read_excel('data/adress_acoustic_train.xlsx', sheet_name='Sheet1')
-    # cc_meta = pd.read_csv("data/ADReSS/meta_all.txt", sep=';')
-
-    # df_audio = pd.read_excel('data/acoustic_feature_adress.xlsx', sheet_name='Sheet2')
-    # df_feature = pd.read_excel('data/important_audio_feature.xlsx', sheet_name='Sheet1')
-    # df_feature_column=list(df_feature.loc[:,"feature_no"])
-
-    df_test = pd.read_excel('data/adress_acoustic_test.xlsx', sheet_name='Sheet1')
-
-    y_train = df.mmse.values / 30
-    y_test = df_test.mmse.values / 30
-
-    x_train = df.iloc[:, 4:]
-    x_test = df_test.iloc[:, 2:]
-
-    rmse, mae, pearson, r2, result = SVR_regression(x_train, x_test, y_train, y_test)
-
-    rmse_list["rmse"].append(rmse)
-    rmse_list["MAE"].append(mae)
-    rmse_list["pearson"].append(pearson)
-    rmse_list["r2"].append(r2)
-
-    print("rmse")
-    print(rmse)
-    print("MAE")
-    print(mae)
-    print("pearson")
-    print(pearson)
-    print("R2")
-    print(r2)
-
-    save_result("adress_fs_audio_poly", 1)
-    save_result("adress_fs_audio_2_poly", 2)
-    # prepare final rmse score on transcript level averaging rmse value for each segment of the audio for
-    # the transcript
-    voting()
 
 
 # linguistic_model()
