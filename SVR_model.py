@@ -10,7 +10,6 @@ import seaborn as sns
 import sklearn.gaussian_process as gp
 import statsmodels.api as sm
 from sklearn import tree
-from sklearn.decomposition import PCA
 # from keras import Sequential
 # from keras.layers import Dense
 from sklearn.ensemble import RandomForestRegressor
@@ -21,9 +20,9 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import cross_validate
 from sklearn.preprocessing import StandardScaler
 # import tensorflow as tf
-from sklearn.svm import SVR
+from sklearn.svm import SVR, SVC
 
-result_list = {"speaker": [], "svr": [], 'dt': [], 'gp': []}
+result_list = {"speaker": [], "svr": [], 'dt': [], 'gp': [], 'target': []}
 rmse_list = {"rmse": [], "MAE": [], "pearson": [], "r2": []}
 result_csv = ''
 
@@ -447,20 +446,28 @@ def Regression(x_train, y_train, regressor):
                             y_train,
                             cv=x_train.shape[0],
                             scoring=['neg_mean_squared_error', 'neg_mean_absolute_error'],  # , 'r2'],
-                            return_estimator=True)
+                            )
     regressor.fit(x_train, y_train)
     return scores, regressor
 
 
-# def Classifcation(x_train, y_train, classifier):
-#     scores = cross_val_score(estimator=classifier, X=x_train, y=y_train, cv=x_train.shape[0], n_jobs=4)
-#     return scores, classifier
+def Classification(x_train, y_train, classifier):
+    classifier.fit(x_train, y_train)
+    scores = cross_validate(classifier,
+                            x_train,
+                            y_train,
+                            cv=x_train.shape[0],
+                            scoring=['accuracy', 'f1'],  # , 'r2'],
+                            )
+
+    return scores, classifier
 
 
 def get_data(silence_file='speaker_data_acoustic_silence_features.csv',
              embeddings_file='speaker_file_silence_embedding.pkl',
              embedding_only=False,
-             n_components=70,
+             n_features=1024,
+             n_components=1024,
              sc_y=StandardScaler()):
     filename = 'testing_data'
     with open(embeddings_file, "rb") as input_file:
@@ -473,15 +480,16 @@ def get_data(silence_file='speaker_data_acoustic_silence_features.csv',
         embeddings = embeddings[['speaker', 'embedding_new', 'mmse', 'dx']]
 
     embeddings['embedding_new'] = embeddings['embedding_new'].apply(lambda x: x[0] if x else x)
-    feature_set = ['f{}'.format(i) for i in range(1024)]
+    feature_set = ['f{}'.format(i) for i in range(n_features)]
     component_set = ['f{}'.format(i) for i in range(n_components)]
     embeddings[feature_set] = pd.DataFrame(embeddings.embedding_new.tolist(), index=embeddings.index)
     embeddings = embeddings[~embeddings.isin([np.nan, np.inf, -np.inf]).any(1)]
     X = embeddings[feature_set].to_numpy()
     ## PCA
-    pca = PCA(n_components=n_components, svd_solver="randomized")
-    X = pca.fit_transform(X)
+    # pca = PCA(n_components=n_components, svd_solver="randomized")
+    # X = pca.fit_transform(X)
     Y_mmse = None
+    _Y_mmse = None
     Y_dx = None
     if 'test' in embeddings_file:
         df = pd.DataFrame(np.hstack((embeddings[['speaker']].values, X)),
@@ -493,21 +501,20 @@ def get_data(silence_file='speaker_data_acoustic_silence_features.csv',
         Y_mmse = embeddings.mmse.values / 30
         Y_dx = pd.factorize(embeddings.dx)[0]
         Y_mmse = sc_y.fit_transform(Y_mmse.reshape(-1, 1)).flatten()
-        Y_dx = sc_y.fit_transform(Y_dx.reshape(-1, 1)).flatten()
     file_speaker = df['speaker'].tolist()
     if embedding_only:
-        filename += '_embedding_only.pkl'
+        filename += '_embedding_only_{}.pkl'.format(n_components)
         # Standard Scaler
         X = StandardScaler().fit_transform(X)
         pickle.dump([X, Y_mmse, Y_dx], open(filename, 'wb'))
-        return X, Y_mmse, Y_dx, file_speaker, sc_y
+        return X, _Y_mmse, Y_mmse, Y_dx, file_speaker, sc_y
     silence_columns = ['mean_silence_duration',
                        'mean_speech_duration',
                        'silence_rate',
                        'silence_count_ratio',
                        'silence_to_speech_ratio',
                        'mean_silence_count']
-    filename += '_with_silence_features.pkl'
+    filename += '_with_silence_features_{}.pkl'.format(n_components)
     silence = pd.read_csv(silence_file, usecols=['speaker'] + silence_columns)
     df = reduce(lambda left, right: pd.merge(left, right, on='speaker'), [df,
                                                                           silence
@@ -521,30 +528,54 @@ def get_data(silence_file='speaker_data_acoustic_silence_features.csv',
         Y_mmse = df.mmse.values / 30
         Y_dx = pd.factorize(df.dx)[0]
         Y_mmse = sc_y.fit_transform(Y_mmse.reshape(-1, 1)).flatten()
-        Y_dx = sc_y.fit_transform(Y_dx.reshape(-1, 1)).flatten()
     X = df[component_set + silence_columns].to_numpy()
     X = StandardScaler().fit_transform(X)
     pickle.dump([X, Y_mmse, Y_dx], open(filename, 'wb'))
     return X, Y_mmse, Y_dx, file_speaker, sc_y
 
 
-def acoustic_model2(embedding_only=False):
-    result_list = {"speaker": [], "svr": [], 'dt': [], 'gp': []}
-    X, Y_mmse, Y_dx, speaker_train, sc_y = get_data(embedding_only=embedding_only)
-
-    svr = SVR(kernel='poly', C=100, gamma='auto', degree=3, epsilon=.1, coef0=1)
+def regression_setup():
+    svr = SVR(kernel='rbf', C=100, gamma='auto', degree=3, epsilon=.1, coef0=1)
     dt = tree.DecisionTreeRegressor(max_leaf_nodes=20)
     gpr = gp.GaussianProcessRegressor(
         kernel=gp.kernels.ConstantKernel(1.0, (1e-1, 1e3)) * gp.kernels.RBF(10.0, (1e-3, 1e3)),
         n_restarts_optimizer=10,
         alpha=0.1,
         normalize_y=True)
-    svr_scores, svr = Regression(X, Y_mmse, svr)
-    dt_scores, dt = Regression(X, Y_mmse, dt)
-    gpr_scores, gpr = Regression(X, Y_mmse, gpr)
-    X_test, _, _, speaker_test, _ = get_data(silence_file='speaker_data_features_test.csv',
-                                             embeddings_file='speaker_file_embeddings_test.pkl',
-                                             embedding_only=embedding_only)
+    return svr, dt, gpr
+
+
+def classification_setup():
+    svr = SVC(kernel='linear', C=1)
+    dt = tree.DecisionTreeClassifier(criterion='gini', max_leaf_nodes=20)
+    kernel = 1.0 * gp.kernels.RBF(1.0)
+    gpr = gp.GaussianProcessClassifier(kernel=kernel,
+                                       random_state=0, n_restarts_optimizer=10
+                                       )
+    return svr, dt, gpr
+
+
+def acoustic_model2(embedding_only=False, n_components=1024, option='regression'):
+    print('start')
+    for p in result_list:
+        result_list[p] = []
+    X, _Y_mmse, Y_mmse, Y_dx, speaker_train, sc_y = get_data(embedding_only=embedding_only, n_components=n_components)
+
+    if option == 'regression':
+        svr, dt, gpr = regression_setup()
+        svr_scores, svr = Regression(X, Y_mmse, svr)
+        dt_scores, dt = Regression(X, Y_mmse, dt)
+        gpr_scores, gpr = Regression(X, Y_mmse, gpr)
+    else:
+        print(Y_dx)
+        svr, dt, gpr = classification_setup()
+        svr_scores, svr = Classification(X, Y_dx, svr)
+        dt_scores, dt = Classification(X, Y_dx, dt)
+        gpr_scores, gpr = Classification(X, Y_dx, gpr)
+    X_test, _, _, _, speaker_test, _ = get_data(silence_file='speaker_data_features_test.csv',
+                                                embeddings_file='speaker_file_embeddings_test.pkl',
+                                                embedding_only=embedding_only,
+                                                n_components=n_components)
     y_mmse_pred_svr = sc_y.inverse_transform(svr.predict(X_test)) * 30
     y_mmse_pred_dt = sc_y.inverse_transform(dt.predict(X_test)) * 30
     y_mmse_pred_gpr = sc_y.inverse_transform(gpr.predict(X_test)) * 30
@@ -581,7 +612,7 @@ def acoustic_model2(embedding_only=False):
     # y_test_pred_gp = sc_y.inverse_transform(gpr.predict(X_test))
 
     # x_train, x_test, y_train, y_test = train_test_split(X, Y_mmse, test_size=0.33, random_state=42)
-    save_result("adresso_" + str(embedding_only), 1, result_list)
+    save_result("adresso_{}_{}_".format(n_components, option) + str(embedding_only), 1, result_list)
     # save_result("adress_fs_audio_2_poly", 2)
     # # prepare final rmse score on transcript level averaging rmse value for each segment of the audio for
     # # the transcript
@@ -591,6 +622,8 @@ def acoustic_model2(embedding_only=False):
 # linguistic_model()
 acoustic_model2(embedding_only=True)
 acoustic_model2()
+# acoustic_model2(embedding_only=True, option='classification')
+# acoustic_model2(option='classification')
 
 # kf = KFold(n_splits=5,shuffle=True)
 
