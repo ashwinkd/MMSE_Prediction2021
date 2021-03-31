@@ -476,12 +476,13 @@ def Classification(x, y, classifier, embedding_only, n_components):
     classifier.fit(x, y)
     _train_results = {'y_pred': [],
                       'y_test': []}
-    scores = cross_validate(classifier,
-                            x,
-                            y,
-                            cv=x.shape[0],
-                            scoring=['accuracy', 'f1'],  # , 'r2'],
-                            )
+    scores = None
+    # scores = cross_validate(classifier,
+    #                         x,
+    #                         y,
+    #                         cv=x.shape[0],
+    #                         scoring=['accuracy', 'f1'],  # , 'r2'],
+    #                         )
     loo = LeaveOneOut()
 
     for train_index, test_index in loo.split(x):
