@@ -13,6 +13,7 @@ import statsmodels.api as sm
 from sklearn import tree
 # from keras import Sequential
 # from keras.layers import Dense
+from sklearn.decomposition import PCA
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.feature_selection import RFE, SelectFromModel
@@ -520,7 +521,8 @@ def get_data(silence_file='speaker_data_acoustic_silence_features.csv',
              embedding_only=False,
              n_features=1024,
              n_components=1024,
-             sc_y=StandardScaler()):
+             sc_y=StandardScaler(),
+             do_pca=False):
     filename = 'testing_data'
     with open(embeddings_file, "rb") as input_file:
         embeddings = pickle.load(input_file)
@@ -538,8 +540,9 @@ def get_data(silence_file='speaker_data_acoustic_silence_features.csv',
     embeddings = embeddings[~embeddings.isin([np.nan, np.inf, -np.inf]).any(1)]
     X = embeddings[feature_set].to_numpy()
     ## PCA
-    # pca = PCA(n_components=n_components, svd_solver="randomized")
-    # X = pca.fit_transform(X)
+    if do_pca:
+        pca = PCA(n_components=n_components, svd_solver="randomized")
+        X = pca.fit_transform(X)
     Y_mmse = None
     Y_dx = None
     if 'test' in embeddings_file:
@@ -606,10 +609,12 @@ def classification_setup():
     return svr, dt
 
 
-def acoustic_model2(embedding_only=False, n_components=1024, option='regression'):
+def acoustic_model2(embedding_only=False, n_components=1024, option='regression', do_pca=False):
     print('start')
     result_list = {'speaker': [], 'svr': [], 'dt': []}
-    X, Y_mmse, Y_dx, speaker_train, sc_y = get_data(embedding_only=embedding_only, n_components=n_components)
+    X, Y_mmse, Y_dx, speaker_train, sc_y = get_data(embedding_only=embedding_only,
+                                                    n_components=n_components,
+                                                    do_pca=do_pca)
 
     if option == 'regression':
         svr, dt = regression_setup()
@@ -623,7 +628,8 @@ def acoustic_model2(embedding_only=False, n_components=1024, option='regression'
     X_test, _, _, speaker_test, _ = get_data(silence_file='speaker_data_features_test.csv',
                                              embeddings_file='speaker_file_embeddings_test.pkl',
                                              embedding_only=embedding_only,
-                                             n_components=n_components)
+                                             n_components=n_components,
+                                             do_pca=do_pca)
     y_mmse_pred_svr = sc_y.inverse_transform(svr.predict(X_test)) * 30
     y_mmse_pred_dt = sc_y.inverse_transform(dt.predict(X_test)) * 30
     for val in y_mmse_pred_svr:
@@ -664,11 +670,13 @@ def acoustic_model2(embedding_only=False, n_components=1024, option='regression'
     # voting()
 
 
+do_pca = True
+n_components = 70
 # linguistic_model()
-acoustic_model2(embedding_only=True)
-acoustic_model2()
-acoustic_model2(embedding_only=True, option='classification')
-acoustic_model2(option='classification')
+acoustic_model2(embedding_only=True, do_pca=do_pca, n_components=n_components)
+acoustic_model2(do_pca=do_pca, n_components=n_components)
+acoustic_model2(embedding_only=True, option='classification', do_pca=do_pca, n_components=n_components)
+acoustic_model2(option='classification', do_pca=do_pca, n_components=n_components)
 
 # kf = KFold(n_splits=5,shuffle=True)
 
