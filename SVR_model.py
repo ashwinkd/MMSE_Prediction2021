@@ -670,8 +670,8 @@ def acoustic_model2(embedding_only=False, n_components=1024, option='regression'
     # voting()
 
 
-do_pca = True
-n_components = 70
+do_pca = False
+n_components = 1024
 # linguistic_model()
 acoustic_model2(embedding_only=True, do_pca=do_pca, n_components=n_components)
 acoustic_model2(do_pca=do_pca, n_components=n_components)
