@@ -17,7 +17,8 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.feature_selection import RFE, SelectFromModel
 from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, classification_report, f1_score, \
+    accuracy_score
 from sklearn.model_selection import cross_validate, LeaveOneOut
 from sklearn.preprocessing import StandardScaler
 # import tensorflow as tf
@@ -446,7 +447,7 @@ def _get_scores(y_pred, y_test):
     return test_rmse, test_MAE, pearson, r2
 
 
-def Regression(x, y, regressor, embedding_only, n_components):
+def Regression(x, y, regressor, embedding_only, n_components, sc_y):
     regressor.fit(x, y)
     _train_results = {'y_pred': [],
                       'y_test': []}
@@ -456,9 +457,9 @@ def Regression(x, y, regressor, embedding_only, n_components):
                             cv=x.shape[0],
                             scoring=['neg_mean_squared_error', 'neg_mean_absolute_error'],  # , 'r2'],
                             )
-    print(np.std(scores['test_neg_mean_squared_error']),
-          np.min(scores['test_neg_mean_squared_error']),
-          np.max(scores['test_neg_mean_squared_error']))
+    print("Std dev: ", np.std(scores['test_neg_mean_squared_error']),
+          "Min RMSE: ", np.min(scores['test_neg_mean_squared_error']),
+          "Max RMSE: ", np.max(scores['test_neg_mean_squared_error']))
     loo = LeaveOneOut()
 
     for train_index, test_index in loo.split(x):
@@ -467,12 +468,22 @@ def Regression(x, y, regressor, embedding_only, n_components):
         regressor2 = copy.deepcopy(regressor)
         regressor2.fit(X_train, y_train)
         y_pred = regressor2.predict(X_test)
-        _train_results['y_test'].append(y_test[0])
-        _train_results['y_pred'].append(y_pred[0])
-
+        _train_results['y_test'].append(sc_y.inverse_transform(y_test)[0] * 30)
+        _train_results['y_pred'].append(sc_y.inverse_transform(y_pred)[0] * 30)
+    print(list(zip(['RMSE', 'MAE', 'R2'], _get_scores(_train_results['y_pred'], _train_results['y_test']))))
     save_result('train_results_{}_{}_{}'.format(embedding_only, n_components, str(regressor).split('(')[0]), 1,
                 _train_results)
     return scores, regressor
+
+
+def _get_labels(_train_results):
+    key_map = {0.0: 'ad', 1.0: 'cn'}
+    _result = {}
+    for key in _train_results:
+        _result[key] = []
+        for val in _train_results[key]:
+            _result[key].append(key_map[val])
+    return _result
 
 
 def Classification(x, y, classifier, embedding_only, n_components):
@@ -496,9 +507,11 @@ def Classification(x, y, classifier, embedding_only, n_components):
         y_pred = classifier2.predict(X_test)
         _train_results['y_test'].append(y_test[0])
         _train_results['y_pred'].append(y_pred[0])
-
+    print(classification_report(_train_results['y_test'], _train_results['y_pred']))
+    print("f1: ", f1_score(_train_results['y_test'], _train_results['y_pred']))
+    print('accuracy: ', accuracy_score(_train_results['y_test'], _train_results['y_pred']))
     save_result('train_results_{}_{}_{}'.format(embedding_only, n_components, str(classifier).split('(')[0]), 1,
-                _train_results)
+                _get_labels(_train_results))
     return scores, classifier
 
 
@@ -600,8 +613,8 @@ def acoustic_model2(embedding_only=False, n_components=1024, option='regression'
 
     if option == 'regression':
         svr, dt = regression_setup()
-        svr_scores, svr = Regression(X, Y_mmse, svr, embedding_only, n_components)
-        dt_scores, dt = Regression(X, Y_mmse, dt, embedding_only, n_components)
+        svr_scores, svr = Regression(X, Y_mmse, svr, embedding_only, n_components, sc_y)
+        dt_scores, dt = Regression(X, Y_mmse, dt, embedding_only, n_components, sc_y)
     else:
         print(Y_dx)
         svr, dt = classification_setup()
@@ -654,8 +667,8 @@ def acoustic_model2(embedding_only=False, n_components=1024, option='regression'
 # linguistic_model()
 acoustic_model2(embedding_only=True)
 acoustic_model2()
-# acoustic_model2(embedding_only=True, option='classification')
-# acoustic_model2(option='classification')
+acoustic_model2(embedding_only=True, option='classification')
+acoustic_model2(option='classification')
 
 # kf = KFold(n_splits=5,shuffle=True)
 
