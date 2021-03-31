@@ -548,11 +548,11 @@ def acoustic_model2(embedding_only=False):
     y_mmse_pred_dt = sc_y.inverse_transform(dt.predict(X_test)) * 30
     y_mmse_pred_gpr = sc_y.inverse_transform(gpr.predict(X_test)) * 30
     for val in y_mmse_pred_svr:
-        result_list['svr'].append(val * 30)
+        result_list['svr'].append(val)
     for val in y_mmse_pred_dt:
-        result_list['dt'].append(val * 30)
+        result_list['dt'].append(val)
     for val in y_mmse_pred_gpr:
-        result_list['gp'].append(val * 30)
+        result_list['gp'].append(val)
     for val in speaker_test:
         result_list["speaker"].append(val)
     # for train_index, test_index in loo.split(X_test):
