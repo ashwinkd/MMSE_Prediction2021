@@ -1,4 +1,5 @@
 # Working Code
+import copy
 import pickle
 from cmath import sqrt
 from functools import reduce
@@ -17,13 +18,17 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.feature_selection import RFE, SelectFromModel
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from sklearn.model_selection import cross_validate
+from sklearn.model_selection import cross_validate, LeaveOneOut
 from sklearn.preprocessing import StandardScaler
 # import tensorflow as tf
 from sklearn.svm import SVR, SVC
 
-result_list = {"speaker": [], "svr": [], 'dt': [], 'gp': [], 'target': []}
+result_list = {"speaker": [], "svr": [], 'dt': [], 'gp': []}
 rmse_list = {"rmse": [], "MAE": [], "pearson": [], "r2": []}
+train_results = {'svr': [],
+                 'dt': [],
+                 'gp': [],
+                 'target': []}
 result_csv = ''
 
 
@@ -98,17 +103,18 @@ def save_feature(df, name):
     writer.save()
 
 
+def write_to_excel(name, df):
+    writer = pd.ExcelWriter(name + ".xlsx", engine='xlsxwriter')
+    df.to_excel(writer, sheet_name='Sheet1', columns=df.columns)
+    writer.save()
+
+
 def save_result(name, num, result_list):
     if num == 1:
-        df = pd.DataFrame(result_list)
-        cols = df.columns.tolist()
+        df = pd.DataFrame(result_list, columns=list(result_list.keys()))
     else:
         df = pd.DataFrame(rmse_list)
-        cols = df.columns.tolist()
-    writer = pd.ExcelWriter(name + ".xlsx", engine='xlsxwriter')
-
-    df.to_excel(writer, sheet_name='Sheet1', columns=cols)
-    writer.save()
+    write_to_excel(name, df)
 
 
 # plot vovabulary feature
@@ -440,14 +446,28 @@ def _get_scores(y_pred, y_test):
     return test_rmse, test_MAE, pearson, r2
 
 
-def Regression(x_train, y_train, regressor):
+def Regression(x, y, regressor, embedding_only, n_components, option):
+    _train_results = {'y_pred': [],
+                      'y_test': []}
     scores = cross_validate(regressor,
-                            x_train,
-                            y_train,
-                            cv=x_train.shape[0],
+                            x,
+                            y,
+                            cv=x.shape[0],
                             scoring=['neg_mean_squared_error', 'neg_mean_absolute_error'],  # , 'r2'],
                             )
-    regressor.fit(x_train, y_train)
+    loo = LeaveOneOut()
+
+    for train_index, test_index in loo.split(x):
+        X_train, X_test = x[train_index], x[test_index]
+        y_train, y_test = y[train_index], y[test_index]
+        regressor2 = copy.deepcopy(regressor)
+        regressor2.fit(X_train, y_train)
+        y_pred = regressor2.predict(X_test)
+        _train_results['y_test'].append(y_test[0])
+        _train_results['y_pred'].append(y_pred[0])
+
+    save_result('train_results_{}_{}_{}'.format(embedding_only, n_components, str(regressor)), 1, _train_results)
+    regressor.fit(x, y)
     return scores, regressor
 
 
@@ -563,9 +583,9 @@ def acoustic_model2(embedding_only=False, n_components=1024, option='regression'
 
     if option == 'regression':
         svr, dt, gpr = regression_setup()
-        svr_scores, svr = Regression(X, Y_mmse, svr)
-        dt_scores, dt = Regression(X, Y_mmse, dt)
-        gpr_scores, gpr = Regression(X, Y_mmse, gpr)
+        svr_scores, svr = Regression(X, Y_mmse, svr, embedding_only, n_components, option)
+        dt_scores, dt = Regression(X, Y_mmse, dt, embedding_only, n_components, option)
+        gpr_scores, gpr = Regression(X, Y_mmse, gpr, embedding_only, n_components, option)
     else:
         print(Y_dx)
         svr, dt, gpr = classification_setup()
@@ -612,7 +632,7 @@ def acoustic_model2(embedding_only=False, n_components=1024, option='regression'
     # y_test_pred_gp = sc_y.inverse_transform(gpr.predict(X_test))
 
     # x_train, x_test, y_train, y_test = train_test_split(X, Y_mmse, test_size=0.33, random_state=42)
-    save_result("adresso_{}_{}_".format(n_components, option) + str(embedding_only), 1, result_list)
+    save_result("adresso_{}_{}_{}_".format(n_components, option, embedding_only), 1, result_list)
     # save_result("adress_fs_audio_2_poly", 2)
     # # prepare final rmse score on transcript level averaging rmse value for each segment of the audio for
     # # the transcript
@@ -620,7 +640,7 @@ def acoustic_model2(embedding_only=False, n_components=1024, option='regression'
 
 
 # linguistic_model()
-acoustic_model2(embedding_only=True)
+# acoustic_model2(embedding_only=True)
 acoustic_model2()
 # acoustic_model2(embedding_only=True, option='classification')
 # acoustic_model2(option='classification')
