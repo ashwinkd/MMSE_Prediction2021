@@ -448,6 +448,7 @@ def Regression(x_train, y_train, regressor):
                             cv=x_train.shape[0],
                             scoring=['neg_mean_squared_error', 'neg_mean_absolute_error'],  # , 'r2'],
                             return_estimator=True)
+    regressor.fit(x_train, y_train)
     return scores, regressor
 
 
