@@ -456,6 +456,9 @@ def Regression(x, y, regressor, embedding_only, n_components):
                             cv=x.shape[0],
                             scoring=['neg_mean_squared_error', 'neg_mean_absolute_error'],  # , 'r2'],
                             )
+    print(np.std(scores['test_neg_mean_squared_error']),
+          np.min(scores['test_neg_mean_squared_error']),
+          np.max(scores['test_neg_mean_squared_error']))
     loo = LeaveOneOut()
 
     for train_index, test_index in loo.split(x):
@@ -641,7 +644,7 @@ def acoustic_model2(embedding_only=False, n_components=1024, option='regression'
     # y_test_pred_gp = sc_y.inverse_transform(gpr.predict(X_test))
 
     # x_train, x_test, y_train, y_test = train_test_split(X, Y_mmse, test_size=0.33, random_state=42)
-    save_result("adresso_{}_{}_{}_".format(n_components, option, embedding_only), 1, result_list)
+    save_result("adresso_{}_{}_{}".format(n_components, option, embedding_only), 1, result_list)
     # save_result("adress_fs_audio_2_poly", 2)
     # # prepare final rmse score on transcript level averaging rmse value for each segment of the audio for
     # # the transcript
@@ -649,10 +652,10 @@ def acoustic_model2(embedding_only=False, n_components=1024, option='regression'
 
 
 # linguistic_model()
-# acoustic_model2(embedding_only=True)
-# acoustic_model2()
-acoustic_model2(embedding_only=True, option='classification')
-acoustic_model2(option='classification')
+acoustic_model2(embedding_only=True)
+acoustic_model2()
+# acoustic_model2(embedding_only=True, option='classification')
+# acoustic_model2(option='classification')
 
 # kf = KFold(n_splits=5,shuffle=True)
 
