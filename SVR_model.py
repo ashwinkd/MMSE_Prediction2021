@@ -99,7 +99,7 @@ def save_feature(df, name):
     writer.save()
 
 
-def save_result(name, num):
+def save_result(name, num, result_list):
     if num == 1:
         df = pd.DataFrame(result_list)
         cols = df.columns.tolist()
@@ -529,6 +529,7 @@ def get_data(silence_file='speaker_data_acoustic_silence_features.csv',
 
 
 def acoustic_model2(embedding_only=False):
+    result_list = {"speaker": [], "svr": [], 'dt': [], 'gp': []}
     X, Y_mmse, Y_dx, speaker_train, sc_y = get_data(embedding_only=embedding_only)
 
     svr = SVR(kernel='poly', C=100, gamma='auto', degree=3, epsilon=.1, coef0=1)
@@ -580,7 +581,7 @@ def acoustic_model2(embedding_only=False):
     # y_test_pred_gp = sc_y.inverse_transform(gpr.predict(X_test))
 
     # x_train, x_test, y_train, y_test = train_test_split(X, Y_mmse, test_size=0.33, random_state=42)
-    save_result("adresso_" + str(embedding_only), 1)
+    save_result("adresso_" + str(embedding_only), 1, result_list)
     # save_result("adress_fs_audio_2_poly", 2)
     # # prepare final rmse score on transcript level averaging rmse value for each segment of the audio for
     # # the transcript
