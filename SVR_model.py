@@ -446,7 +446,8 @@ def _get_scores(y_pred, y_test):
     return test_rmse, test_MAE, pearson, r2
 
 
-def Regression(x, y, regressor, embedding_only, n_components, option):
+def Regression(x, y, regressor, embedding_only, n_components):
+    regressor.fit(x, y)
     _train_results = {'y_pred': [],
                       'y_test': []}
     scores = cross_validate(regressor,
@@ -466,20 +467,34 @@ def Regression(x, y, regressor, embedding_only, n_components, option):
         _train_results['y_test'].append(y_test[0])
         _train_results['y_pred'].append(y_pred[0])
 
-    save_result('train_results_{}_{}_{}'.format(embedding_only, n_components, str(regressor)), 1, _train_results)
-    regressor.fit(x, y)
+    save_result('train_results_{}_{}_{}'.format(embedding_only, n_components, str(regressor).split('(')[0]), 1,
+                _train_results)
     return scores, regressor
 
 
-def Classification(x_train, y_train, classifier):
-    classifier.fit(x_train, y_train)
+def Classification(x, y, classifier, embedding_only, n_components):
+    classifier.fit(x, y)
+    _train_results = {'y_pred': [],
+                      'y_test': []}
     scores = cross_validate(classifier,
-                            x_train,
-                            y_train,
-                            cv=x_train.shape[0],
+                            x,
+                            y,
+                            cv=x.shape[0],
                             scoring=['accuracy', 'f1'],  # , 'r2'],
                             )
+    loo = LeaveOneOut()
 
+    for train_index, test_index in loo.split(x):
+        X_train, X_test = x[train_index], x[test_index]
+        y_train, y_test = y[train_index], y[test_index]
+        classifier2 = copy.deepcopy(classifier)
+        classifier2.fit(X_train, y_train)
+        y_pred = classifier2.predict(X_test)
+        _train_results['y_test'].append(y_test[0])
+        _train_results['y_pred'].append(y_pred[0])
+
+    save_result('train_results_{}_{}_{}'.format(embedding_only, n_components, str(classifier).split('(')[0]), 1,
+                _train_results)
     return scores, classifier
 
 
@@ -509,7 +524,6 @@ def get_data(silence_file='speaker_data_acoustic_silence_features.csv',
     # pca = PCA(n_components=n_components, svd_solver="randomized")
     # X = pca.fit_transform(X)
     Y_mmse = None
-    _Y_mmse = None
     Y_dx = None
     if 'test' in embeddings_file:
         df = pd.DataFrame(np.hstack((embeddings[['speaker']].values, X)),
@@ -527,7 +541,7 @@ def get_data(silence_file='speaker_data_acoustic_silence_features.csv',
         # Standard Scaler
         X = StandardScaler().fit_transform(X)
         pickle.dump([X, Y_mmse, Y_dx], open(filename, 'wb'))
-        return X, _Y_mmse, Y_mmse, Y_dx, file_speaker, sc_y
+        return X, Y_mmse, Y_dx, file_speaker, sc_y
     silence_columns = ['mean_silence_duration',
                        'mean_speech_duration',
                        'silence_rate',
@@ -579,23 +593,23 @@ def acoustic_model2(embedding_only=False, n_components=1024, option='regression'
     print('start')
     for p in result_list:
         result_list[p] = []
-    X, _Y_mmse, Y_mmse, Y_dx, speaker_train, sc_y = get_data(embedding_only=embedding_only, n_components=n_components)
+    X, Y_mmse, Y_dx, speaker_train, sc_y = get_data(embedding_only=embedding_only, n_components=n_components)
 
     if option == 'regression':
         svr, dt, gpr = regression_setup()
-        svr_scores, svr = Regression(X, Y_mmse, svr, embedding_only, n_components, option)
-        dt_scores, dt = Regression(X, Y_mmse, dt, embedding_only, n_components, option)
-        gpr_scores, gpr = Regression(X, Y_mmse, gpr, embedding_only, n_components, option)
+        svr_scores, svr = Regression(X, Y_mmse, svr, embedding_only, n_components)
+        dt_scores, dt = Regression(X, Y_mmse, dt, embedding_only, n_components)
+        gpr_scores, gpr = Regression(X, Y_mmse, gpr, embedding_only, n_components)
     else:
         print(Y_dx)
         svr, dt, gpr = classification_setup()
-        svr_scores, svr = Classification(X, Y_dx, svr)
-        dt_scores, dt = Classification(X, Y_dx, dt)
-        gpr_scores, gpr = Classification(X, Y_dx, gpr)
-    X_test, _, _, _, speaker_test, _ = get_data(silence_file='speaker_data_features_test.csv',
-                                                embeddings_file='speaker_file_embeddings_test.pkl',
-                                                embedding_only=embedding_only,
-                                                n_components=n_components)
+        svr_scores, svr = Classification(X, Y_dx, svr, embedding_only, n_components)
+        dt_scores, dt = Classification(X, Y_dx, dt, embedding_only, n_components)
+        gpr_scores, gpr = Classification(X, Y_dx, gpr, embedding_only, n_components)
+    X_test, _, _, speaker_test, _ = get_data(silence_file='speaker_data_features_test.csv',
+                                             embeddings_file='speaker_file_embeddings_test.pkl',
+                                             embedding_only=embedding_only,
+                                             n_components=n_components)
     y_mmse_pred_svr = sc_y.inverse_transform(svr.predict(X_test)) * 30
     y_mmse_pred_dt = sc_y.inverse_transform(dt.predict(X_test)) * 30
     y_mmse_pred_gpr = sc_y.inverse_transform(gpr.predict(X_test)) * 30
@@ -641,9 +655,9 @@ def acoustic_model2(embedding_only=False, n_components=1024, option='regression'
 
 # linguistic_model()
 # acoustic_model2(embedding_only=True)
-acoustic_model2()
-# acoustic_model2(embedding_only=True, option='classification')
-# acoustic_model2(option='classification')
+# acoustic_model2()
+acoustic_model2(embedding_only=True, option='classification')
+acoustic_model2(option='classification')
 
 # kf = KFold(n_splits=5,shuffle=True)
 
