@@ -534,15 +534,15 @@ def get_data(silence_file='speaker_data_acoustic_silence_features.csv',
                           columns=['speaker', 'mmse', 'dx'] + component_set)
         filename = 'training_data'
         Y_mmse = embeddings.mmse.values / 30
-        Y_dx = pd.factorize(embeddings.dx)[0]
-        Y_mmse = sc_y.fit_transform(Y_mmse.reshape(-1, 1)).flatten()
+        Y_dx = pd.factorize(embeddings.dx)[0].astype(float)
+        Y_mmse = sc_y.fit_transform(Y_mmse.reshape(-1, 1)).flatten().astype(float)
     file_speaker = df['speaker'].tolist()
     if embedding_only:
         filename += '_embedding_only_{}.pkl'.format(n_components)
         # Standard Scaler
         X = StandardScaler().fit_transform(X)
         pickle.dump([X, Y_mmse, Y_dx], open(filename, 'wb'))
-        return X, Y_mmse, Y_dx, file_speaker, sc_y
+        return X.astype(float), Y_mmse, Y_dx, file_speaker, sc_y
     silence_columns = ['mean_silence_duration',
                        'mean_speech_duration',
                        'silence_rate',
@@ -561,65 +561,59 @@ def get_data(silence_file='speaker_data_acoustic_silence_features.csv',
         df = df[component_set + silence_columns + ['mmse', 'dx']]
         df = df[~df.isin([np.nan, np.inf, -np.inf]).any(1)]
         Y_mmse = df.mmse.values / 30
-        Y_dx = pd.factorize(df.dx)[0]
-        Y_mmse = sc_y.fit_transform(Y_mmse.reshape(-1, 1)).flatten()
+        Y_dx = pd.factorize(df.dx)[0].astype(float)
+        Y_mmse = sc_y.fit_transform(Y_mmse.reshape(-1, 1)).flatten().astype(float)
     X = df[component_set + silence_columns].to_numpy()
     X = StandardScaler().fit_transform(X)
     pickle.dump([X, Y_mmse, Y_dx], open(filename, 'wb'))
-    return X, Y_mmse, Y_dx, file_speaker, sc_y
+    return X.astype(float), Y_mmse, Y_dx, file_speaker, sc_y
 
 
 def regression_setup():
     svr = SVR(kernel='rbf', C=100, gamma='auto', degree=3, epsilon=.1, coef0=1)
     dt = tree.DecisionTreeRegressor(max_leaf_nodes=20)
-    gpr = gp.GaussianProcessRegressor(
-        kernel=gp.kernels.ConstantKernel(1.0, (1e-1, 1e3)) * gp.kernels.RBF(10.0, (1e-3, 1e3)),
-        n_restarts_optimizer=10,
-        alpha=0.1,
-        normalize_y=True)
-    return svr, dt, gpr
+    # gpr = gp.GaussianProcessRegressor(
+    #     kernel=gp.kernels.ConstantKernel(1.0, (1e-1, 1e3)) * gp.kernels.RBF(10.0, (1e-3, 1e3)),
+    #     n_restarts_optimizer=10,
+    #     alpha=0.1,
+    #     normalize_y=True)
+    return svr, dt
 
 
 def classification_setup():
     svr = SVC(kernel='linear', C=1)
     dt = tree.DecisionTreeClassifier(criterion='gini', max_leaf_nodes=20)
     kernel = 1.0 * gp.kernels.RBF(1.0)
-    gpr = gp.GaussianProcessClassifier(kernel=kernel,
-                                       random_state=0, n_restarts_optimizer=10
-                                       )
-    return svr, dt, gpr
+    # gpr = gp.GaussianProcessClassifier(kernel=kernel,
+    #                                    random_state=0, n_restarts_optimizer=10
+    #                                    )
+    return svr, dt
 
 
 def acoustic_model2(embedding_only=False, n_components=1024, option='regression'):
     print('start')
-    for p in result_list:
-        result_list[p] = []
+    result_list = {'speaker': [], 'svr': [], 'dt': []}
     X, Y_mmse, Y_dx, speaker_train, sc_y = get_data(embedding_only=embedding_only, n_components=n_components)
 
     if option == 'regression':
-        svr, dt, gpr = regression_setup()
+        svr, dt = regression_setup()
         svr_scores, svr = Regression(X, Y_mmse, svr, embedding_only, n_components)
         dt_scores, dt = Regression(X, Y_mmse, dt, embedding_only, n_components)
-        gpr_scores, gpr = Regression(X, Y_mmse, gpr, embedding_only, n_components)
     else:
         print(Y_dx)
-        svr, dt, gpr = classification_setup()
+        svr, dt = classification_setup()
         svr_scores, svr = Classification(X, Y_dx, svr, embedding_only, n_components)
         dt_scores, dt = Classification(X, Y_dx, dt, embedding_only, n_components)
-        gpr_scores, gpr = Classification(X, Y_dx, gpr, embedding_only, n_components)
     X_test, _, _, speaker_test, _ = get_data(silence_file='speaker_data_features_test.csv',
                                              embeddings_file='speaker_file_embeddings_test.pkl',
                                              embedding_only=embedding_only,
                                              n_components=n_components)
     y_mmse_pred_svr = sc_y.inverse_transform(svr.predict(X_test)) * 30
     y_mmse_pred_dt = sc_y.inverse_transform(dt.predict(X_test)) * 30
-    y_mmse_pred_gpr = sc_y.inverse_transform(gpr.predict(X_test)) * 30
     for val in y_mmse_pred_svr:
         result_list['svr'].append(val)
     for val in y_mmse_pred_dt:
         result_list['dt'].append(val)
-    for val in y_mmse_pred_gpr:
-        result_list['gp'].append(val)
     for val in speaker_test:
         result_list["speaker"].append(val)
     # for train_index, test_index in loo.split(X_test):
