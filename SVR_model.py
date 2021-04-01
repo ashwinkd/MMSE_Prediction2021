@@ -24,8 +24,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVR, SVC
 
 # result_list = {"speaker": [], "svr": [], 'dt': [], 'gp': []}
-result_list_classification = {'speaker': [], 'svr': [], 'dt': [], 'lda': [], 'rf': []}
-result_list_regression = {'speaker': [], 'lin': [], 'svr': [], 'dt': []}
+
 rmse_list = {"rmse": [], "MAE": [], "pearson": [], "r2": []}
 train_results = {'svr': [],
                  'dt': [],
@@ -470,7 +469,7 @@ def acoustic_model():
 
 
 def _get_scores(y_pred, y_test):
-    test_rmse = sqrt(mean_squared_error(y_test * 30, y_pred * 30))
+    test_rmse = sqrt(abs(mean_squared_error(y_test * 30, y_pred * 30)))
     test_MAE = mean_absolute_error(y_test * 30, y_pred * 30)
     # pearson = scipy.stats.pearsonr(y_test * 30, y_pred * 30)
     pearson = 0
@@ -479,7 +478,7 @@ def _get_scores(y_pred, y_test):
     return test_rmse, test_MAE, pearson, r2
 
 
-def Regression(x, y, regressor, embedding_only, n_components):
+def Regression(x, y, regressor, embedding_only, n_components, sc_y):
     # regressor.fit(x, y)
     _train_results = {'y_pred': [],
                       'y_test': []}
@@ -499,12 +498,22 @@ def Regression(x, y, regressor, embedding_only, n_components):
         y_train, y_test = y[train_index], y[test_index]
         regressor.fit(X_train, y_train)
         y_pred = regressor.predict(X_test)
-        _train_results['y_test'].append(y_test[0])
-        _train_results['y_pred'].append(y_pred[0])
+        _train_results['y_test'].append(sc_y.inverse_transform(y_test)[0] * 30)
+        _train_results['y_pred'].append(sc_y.inverse_transform(y_pred)[0] * 30)
     print(list(zip(['RMSE', 'MAE', 'R2'], _get_scores(_train_results['y_pred'], _train_results['y_test']))))
     save_result('train_results_{}_{}_{}'.format(embedding_only, n_components, str(regressor).split('(')[0]), 1,
                 _train_results)
     return scores, regressor
+
+
+def _get_labels(_train_results):
+    key_map = {0.0: 'ad', 1.0: 'cn'}
+    _result = {}
+    for key in _train_results:
+        _result[key] = []
+        for val in _train_results[key]:
+            _result[key].append(key_map[val])
+    return _result
 
 
 def Classification(x, y, classifier, embedding_only, n_components):
@@ -533,9 +542,9 @@ def Classification(x, y, classifier, embedding_only, n_components):
     # print('printing result')
     # print(str(classifier))
     # save_result('train_results_{}_{}_{}'.format(embedding_only, n_components, str(classifier).split('(')[0]), 1,
-    #             _train_results)
+    #             _get_labels(_train_results))
     # save_result('train_results_{}_{}_{}'.format(embedding_only, n_components, 'lda'), 1,
-    #             _train_results)
+    #             _get_labels(_train_results))
     return scores, classifier
 
 
@@ -639,21 +648,21 @@ def classification_setup():
 
 def acoustic_model2(embedding_only=False, n_components=1024, option='regression'):
     print('start')
-
     X, Y_mmse, Y_dx, speaker_train, sc_y = get_data(embedding_only=embedding_only, n_components=n_components)
     X_test, _, _, speaker_test, _ = get_data(silence_file='speaker_data_features_test.csv',
                                              embeddings_file='speaker_file_embeddings_test.pkl',
                                              embedding_only=embedding_only,
                                              n_components=n_components)
     if option == 'regression':
+        result_list_regression = {'speaker': [], 'lin': [], 'svr': [], 'dt': []}
         lin, svr, dt = regression_setup()
-        lin_scores, lin = Regression(X, Y_mmse, lin, embedding_only, n_components)
-        svr_scores, svr = Regression(X, Y_mmse, svr, embedding_only, n_components)
-        dt_scores, dt = Regression(X, Y_mmse, dt, embedding_only, n_components)
+        lin_scores, lin = Regression(X, Y_mmse, lin, embedding_only, n_components, sc_y)
+        svr_scores, svr = Regression(X, Y_mmse, svr, embedding_only, n_components, sc_y)
+        dt_scores, dt = Regression(X, Y_mmse, dt, embedding_only, n_components, sc_y)
         print(len(X_test))
-        y_mmse_pred_lin = lin.predict(X_test)
-        y_mmse_pred_svr = svr.predict(X_test)
-        y_mmse_pred_dt = dt.predict(X_test)
+        y_mmse_pred_lin = sc_y.inverse_transform(lin.predict(X_test)) * 30
+        y_mmse_pred_svr = sc_y.inverse_transform(svr.predict(X_test)) * 30
+        y_mmse_pred_dt = sc_y.inverse_transform(dt.predict(X_test)) * 30
 
         # regression
         for val in y_mmse_pred_lin:
@@ -670,6 +679,7 @@ def acoustic_model2(embedding_only=False, n_components=1024, option='regression'
         print(len(result_list_regression['speaker']))
         save_result("adresso_{}_{}_{}".format(n_components, option, embedding_only), 1, result_list_regression)
     else:
+        result_list_classification = {'speaker': [], 'svr': [], 'dt': [], 'lda': [], 'rf': []}
         print(Y_dx)
         # rf = classification_setup()
         svr, dt, lda, rf = classification_setup()
