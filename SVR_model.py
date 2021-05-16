@@ -93,6 +93,42 @@ def segmented_output():
         pickle.dump(df, f)
 
 
+def feature_RF2(X_train, y_train, vocab):
+    imp_feature = []
+    feature_no = []
+    features = []
+    gini = []
+    # print(X_train)
+    # print(y_train)
+    clf = RandomForestClassifier(n_estimators=100)
+    clf.fit(X_train, y_train)
+    sel = SelectFromModel(clf)
+    sel.fit(X_train, y_train)
+    sel.get_support()
+    selected_feat = X_train.columns[(sel.get_support())]
+    feat_labels = list(X_train.columns)
+    # print(len(selected_feat))
+    for feature in selected_feat:
+        features.append(feature)
+
+    for feature, imp in zip(feat_labels, clf.feature_importances_):
+        if (type(feature) == int):
+            if (feature in features):
+                imp_feature.append(vocab[feature])
+                gini.append(imp)
+                feature_no.append(feature)
+        else:
+            if (feature in features):
+                imp_feature.append(feature)
+                gini.append(imp)
+                feature_no.append(feature)
+
+    dict = {"feature": imp_feature, "feature_no": feature_no, "gini": gini}
+    df = pd.DataFrame(dict)
+    final_df = df.sort_values(by=['gini'], ascending=False)
+    return final_df
+
+
 def feature_RF(X_train, y_train, vocab):
     imp_feature = []
     feature_no = []
@@ -364,9 +400,6 @@ def generate_ngrams(df_train, df_test):
     # return y_test
 
 
-from sklearn.model_selection import train_test_split
-
-
 def SVR_regression(x_train, x_test, y_train, y_test):
     X = x_train
     y = y_train.reshape(-1, 1)
@@ -416,63 +449,29 @@ def SVR_regression(x_train, x_test, y_train, y_test):
     return test_rmse, test_MAE, pearson, r2
 
 
-def get_ngram_data(df):
-    df, df_test = train_test_split(df, test_size=0.33, random_state=42)
-    # df_test = pd.read_pickle('data/adress_test.pickle')
-    numeric_label = []
-    numeric_label_test = []
-    for index, row in df.iterrows():
-        numeric_label.append(int(row['mmse']) / 30)
-    for index, row in df_test.iterrows():
-        numeric_label_test.append(int(row['mmse']) / 30)
-    y_train_mmse = np.array(numeric_label)
-    y_tests_mmse = np.array(numeric_label_test)
-    y_train_dx = df.dx.to_numpy()
-    y_test_dx = df_test.dx.to_numpy()
-    # # generate ngrams
-    df_train = df
-    x_train, x_test, vocab = generate_ngrams(df_train, df_test)
-    x_train = pd.DataFrame(x_train.toarray())
-    # # demographic
-    # train_feature_1 = df_train.iloc[:, 4:5]
-    # # # # nonverbal
-    # train_feature_2 = df_train.iloc[:, 7:14]
-    # # # # # psycholinguistic
-    # train_feature_3 = df_train.iloc[:, 15:]
-
-    x_test = pd.DataFrame(x_test.toarray())
-    # test_feature_1 = df_test.iloc[:, 2:3]
-    # test_feature_2 = df_test.iloc[:, 7:14]
-    # test_feature_3 = df_test.iloc[:, 15:]
-
-    # train_feature_1=np.array(train_feature_1)
-    # train_feature_2 = np.array(train_feature_2)
-    # train_feature_3 = np.array(train_feature_3)
-    #
-    # test_feature_1 = np.array(test_feature_1)
-    # test_feature_2 = np.array(test_feature_2)
-    # test_feature_3 = np.array(test_feature_3)
-
-    # x_train = pd.concat((train, train_feature_2, train_feature_3), axis=1)
-    # x_test = pd.concat((test, test_feature_2, test_feature_3), axis=1)
-    # #feature selection
-    #
-    x_train = x_train.fillna(x_train.mean())
-    vocab = list(x_train.columns)
-    df_feature = feature_RF(x_train, y_train_mmse, vocab)
-
-    df_feature_column = df_feature["feature_no"].tolist()
-    x_train = x_train.loc[:, df_feature_column]
-    x_test = x_test.loc[:, df_feature_column]
-    return x_train, x_test, y_train_mmse, y_tests_mmse, y_train_dx, y_test_dx
-
-
 to_categorical = {'Control': 0,
                   'Dementia': 1}
 
 
+def plot_confusion_matrix(df_confusion, title='Confusion matrix', cmap=plt.cm.gray_r):
+    plt.matshow(df_confusion, cmap=cmap)  # imshow
+    # plt.title(title)
+    plt.colorbar()
+    # plt.tight_layout()
+    plt.savefig(f"{title}.png")
+
+
+def speaker_split(df):
+    speakers = set(df.speaker.tolist())
+    for test_speaker in speakers:
+        train_speakers = speakers.difference([test_speaker])
+        df_test = df.loc[df['speaker'] == test_speaker]
+        df_train = df[df['speaker'].isin(list(train_speakers))]
+        yield df_train, df_test
+
+
 def linguistic_model():
-    for filename in ["data2020gold.pickle", "data2020fisher.pickle"]:
+    for filename in ["data2020gold_utt.pickle", "data2020fisher_utt.pickle"]:
         print("#" * 30, filename)
         data = pd.read_pickle(f'data/{filename}').dropna()
         data.dx = data.dx.apply(lambda x: to_categorical[x])
@@ -486,15 +485,45 @@ def linguistic_model():
         data_b = data[['speaker', 'transcript_without_repetition', 'dx', 'mmse']]
         data_c = data[['speaker', 'transcript_without_retracing', 'dx', 'mmse']]
         for condition, df in zip(['all_text', 'wo repetition', 'wo retracing'], [data_a, data_b, data_c]):
+            df = df.sample(frac=1)
             print("#" * 20, condition)
             df.columns = ['speaker', 'utterances', 'dx', 'mmse']
-            x_train, x_test, train_mmse, test_mmse, train_dx, test_dx = get_ngram_data(df)
+            acc_set = []
+            f1_set = []
+            target_set = []
+            pred_set = []
+            for df_train, df_test in speaker_split(df):
+                ytrain = df_train.dx.to_numpy()
+                ytest = df_test.dx.to_numpy()
+                xtrain, xtest, vocab = generate_ngrams(df_train, df_test)
+                xtrain = pd.DataFrame(xtrain.toarray())
+                xtest = pd.DataFrame(xtest.toarray())
+                xtrain = xtrain.fillna(xtrain.mean())
+                vocab = list(xtrain.columns)
+                df_feature = feature_RF2(xtrain, ytrain, vocab)
+
+                df_feature_column = df_feature["feature_no"].tolist()
+                xtrain = xtrain.loc[:, df_feature_column]
+                xtest = xtest.loc[:, df_feature_column]
+                xtrain = xtrain.to_numpy()
+                xtest = xtest.to_numpy()
+                acc, f1, target, pred = Classification(xtrain, ytrain, xtest, ytest)
+                print("Accuracy: ", acc, "F1: ", f1)
+                # print("Confusion Matrix: \n", conf)
+                acc_set.append(acc)
+                f1_set.append(acc)
+                target_set += target
+                pred_set += pred
+            print("*****RESULTS*****")
+            print("AVG Accuracy: ", np.mean(acc_set))
+            print("AVG F1: ", np.mean(f1_set))
+            print("Total Acc: ", accuracy_score(target_set, pred_set))
+            print("Total F1: ", f1_score(target_set, pred_set))
+            cm = confusion_matrix(target_set, pred_set)
+            print("Total Confusion Matrix: \n", cm)
+            plot_confusion_matrix(cm, title=condition)
             # save_feature(df_feature, "important_audio_feature")
-            results = Classification(x_train, train_dx, x_test, test_dx)
-            acc, f1, conf = results
-            print("Accuracy: ", acc)
-            print("F1: ", f1)
-            print("Confusion Matrix: \n", conf)
+
             # for modelname, acc, f1, conf in results:
             #     print("#" * 5, modelname)
             #     print("Accuracy: ", acc)
@@ -609,22 +638,14 @@ def Classification(xtrain, ytrain, xtest, ytest):
     svr_pred = svr.predict(xtest)
     dt_pred = dt.predict(xtest)
     rf_pred = rf.predict(xtest)
-    lda_acc = accuracy_score(lda_pred, ytest)
-    svr_acc = accuracy_score(svr_pred, ytest)
-    dt_acc = accuracy_score(dt_pred, ytest)
-    rf_acc = accuracy_score(rf_pred, ytest)
+    target = np.argmax(np.bincount(ytest))
+    pred = np.argmax(np.bincount(rf_pred))
+    if pred == target:
+        acc = 1
+    else:
+        acc = 0
 
-    lda_f1 = f1_score(lda_pred, ytest)
-    svr_f1 = f1_score(svr_pred, ytest)
-    dt_f1 = f1_score(dt_pred, ytest)
-    rf_f1 = f1_score(rf_pred, ytest)
-
-    lda_conf = confusion_matrix(lda_pred, ytest)
-    svr_conf = confusion_matrix(svr_pred, ytest)
-    dt_conf = confusion_matrix(dt_pred, ytest)
-    rf_conf = confusion_matrix(rf_pred, ytest)
-
-    return svr_acc, svr_f1, svr_conf
+    return acc, 0 + acc, [target], [pred]
 
     # return list(zip(['LDA', 'SVR', 'DT', 'RF'],
     #                 [lda_acc, svr_acc, dt_acc, rf_acc],
