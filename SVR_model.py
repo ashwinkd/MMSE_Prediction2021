@@ -485,43 +485,41 @@ def linguistic_model():
         data_b = data[['speaker', 'transcript_without_repetition', 'dx', 'mmse']]
         data_c = data[['speaker', 'transcript_without_retracing', 'dx', 'mmse']]
         for condition, df in zip(['all_text', 'wo repetition', 'wo retracing'], [data_a, data_b, data_c]):
-            df = df.sample(frac=1)
+            df = df.sample(frac=1, random_state=42)
             print("#" * 20, condition)
             df.columns = ['speaker', 'utterances', 'dx', 'mmse']
-            acc_set = []
-            f1_set = []
+            acc_set1 = []
+            f1_set1 = []
             target_set = []
-            pred_set = []
+            pred_set1 = []
+
+            acc_set2 = []
+            f1_set2 = []
+            pred_set2 = []
             for df_train, df_test in speaker_split(df):
                 ytrain = df_train.dx.to_numpy()
                 ytest = df_test.dx.to_numpy()
                 xtrain, xtest, vocab = generate_ngrams(df_train, df_test)
-                xtrain = pd.DataFrame(xtrain.toarray())
-                xtest = pd.DataFrame(xtest.toarray())
-                xtrain = xtrain.fillna(xtrain.mean())
-                vocab = list(xtrain.columns)
-                df_feature = feature_RF2(xtrain, ytrain, vocab)
-
-                df_feature_column = df_feature["feature_no"].tolist()
-                xtrain = xtrain.loc[:, df_feature_column]
-                xtest = xtest.loc[:, df_feature_column]
-                xtrain = xtrain.to_numpy()
-                xtest = xtest.to_numpy()
-                acc, f1, target, pred = Classification(xtrain, ytrain, xtest, ytest)
-                print("Accuracy: ", acc, "F1: ", f1)
+                xtrain = xtrain.toarray()
+                xtest = xtest.toarray()
+                acc1, acc2, target, pred1, pred2 = Classification(xtrain, ytrain, xtest, ytest)
+                # print("Accuracy: ", acc, "F1: ", f1)
                 # print("Confusion Matrix: \n", conf)
-                acc_set.append(acc)
-                f1_set.append(acc)
-                target_set += target
-                pred_set += pred
+                target_set += [target]
+                pred_set1 += [pred1]
+                pred_set2 += [pred2]
             print("*****RESULTS*****")
-            print("AVG Accuracy: ", np.mean(acc_set))
-            print("AVG F1: ", np.mean(f1_set))
-            print("Total Acc: ", accuracy_score(target_set, pred_set))
-            print("Total F1: ", f1_score(target_set, pred_set))
-            cm = confusion_matrix(target_set, pred_set)
+            print("SVR: ")
+            print("Total Acc: ", accuracy_score(target_set, pred_set1))
+            print("Total F1: ", f1_score(target_set, pred_set1))
+            cm = confusion_matrix(target_set, pred_set1)
             print("Total Confusion Matrix: \n", cm)
-            plot_confusion_matrix(cm, title=condition)
+
+            print("Random Forest: ")
+            print("Total Acc: ", accuracy_score(target_set, pred_set2))
+            print("Total F1: ", f1_score(target_set, pred_set2))
+            cm = confusion_matrix(target_set, pred_set2)
+            print("Total Confusion Matrix: \n", cm)
             # save_feature(df_feature, "important_audio_feature")
 
             # for modelname, acc, f1, conf in results:
@@ -639,13 +637,18 @@ def Classification(xtrain, ytrain, xtest, ytest):
     dt_pred = dt.predict(xtest)
     rf_pred = rf.predict(xtest)
     target = np.argmax(np.bincount(ytest))
+    pred_svr = np.argmax(np.bincount(svr_pred))
+    if pred_svr == target:
+        svr_acc = 1
+    else:
+        svr_acc = 0
     pred = np.argmax(np.bincount(rf_pred))
     if pred == target:
-        acc = 1
+        rf_acc = 1
     else:
-        acc = 0
+        rf_acc = 0
 
-    return acc, 0 + acc, [target], [pred]
+    return svr_acc, rf_acc, target, pred_svr, pred
 
     # return list(zip(['LDA', 'SVR', 'DT', 'RF'],
     #                 [lda_acc, svr_acc, dt_acc, rf_acc],
