@@ -17,7 +17,8 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.feature_selection import RFE, SelectFromModel
 from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, accuracy_score, f1_score, \
+    confusion_matrix
 from sklearn.model_selection import cross_validate, LeaveOneOut
 from sklearn.preprocessing import StandardScaler
 # import tensorflow as tf
@@ -363,17 +364,71 @@ def generate_ngrams(df_train, df_test):
     # return y_test
 
 
-def linguistic_model():
-    df = pd.read_pickle('data/adress_final_interview.pickle')
-    df_test = pd.read_pickle('data/adress_test.pickle')
+from sklearn.model_selection import train_test_split
+
+
+def SVR_regression(x_train, x_test, y_train, y_test):
+    X = x_train
+    y = y_train.reshape(-1, 1)
+    # 3 Feature Scaling
+    from sklearn.preprocessing import StandardScaler
+    sc_X = StandardScaler(with_mean=False)
+    sc_y = StandardScaler()
+    X = sc_X.fit_transform(X)
+    y = sc_y.fit_transform(y)
+
+    # 4 Fitting the Support Vector Regression Model to the dataset
+    # Create your support vector regressor here
+    # df_train = df_train.iloc[:, 1:]
+    # print("GP model")
+    # import sklearn.gaussian_process as gp
+    # most important SVR parameter is Kernel type. It can be #linear,polynomial or gaussian SVR. We have a non-linear condition #so we can select polynomial or gaussian but here we select RBF(a #gaussian type) kernel.
+    # regressor = SVR(kernel='rbf', C=100, gamma=0.1, epsilon=.1)
+    regressor = SVR(kernel='poly', C=100, gamma='auto', degree=3, epsilon=.1, coef0=1)
+    regressor.fit(X, y)
+    # regressor = tree.DecisionTreeRegressor(max_leaf_nodes=20)
+    # regressor.fit(X, y)
+    # kernel = gp.kernels.ConstantKernel(1.0, (1e-1, 1e3)) * gp.kernels.RBF(10.0, (1e-3, 1e3))
+    #
+    # regressor = gp.GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=10, alpha=0.1, normalize_y=True)
+    # regressor.fit(X, y)
+    # params = model.kernel_.get_params()
+    # print("gp model fit")
+    # 5 Predicting a new result
+    # y_pred, std = regressor.predict(x_test, return_std=True)
+    # print("GP model pred")
+    # x_test=x_test.fillna(x_test.mean())
+    # print(x_test)
+    # y_pred = regressor.predict(x_test)
+    y_pred = sc_y.inverse_transform((regressor.predict(sc_X.transform(x_test))))
+    test_rmse = sqrt(mean_squared_error(y_test * 30, y_pred * 30))
+    test_MAE = mean_absolute_error(y_test * 30, y_pred * 30)
+    # pearson=scipy.stats.pearsonr(y_test * 30, y_pred * 30)
+    pearson = 0
+    r2 = r2_score(y_test * 30, y_pred * 30)
+    # for val in y_pred:
+    #     result_list["result"].append(val * 30)
+    # for val in y_test:
+    #     result_list["test"].append(val * 30)
+    # print("MAE")
+    # print(test_MAE)
+
+    return test_rmse, test_MAE, pearson, r2
+
+
+def get_ngram_data(df):
+    df, df_test = train_test_split(df, test_size=0.33, random_state=42)
+    # df_test = pd.read_pickle('data/adress_test.pickle')
     numeric_label = []
     numeric_label_test = []
     for index, row in df.iterrows():
         numeric_label.append(int(row['mmse']) / 30)
     for index, row in df_test.iterrows():
         numeric_label_test.append(int(row['mmse']) / 30)
-    y_train = np.array(numeric_label)
-    y_tests = np.array(numeric_label_test)
+    y_train_mmse = np.array(numeric_label)
+    y_tests_mmse = np.array(numeric_label_test)
+    y_train_dx = df.dx.to_numpy()
+    y_test_dx = df_test.dx.to_numpy()
     # # generate ngrams
     df_train = df
     x_train, x_test, vocab = generate_ngrams(df_train, df_test)
@@ -404,29 +459,54 @@ def linguistic_model():
     #
     x_train = x_train.fillna(x_train.mean())
     vocab = list(x_train.columns)
-    df_feature = feature_RF(x_train, y_train, vocab)
+    df_feature = feature_RF(x_train, y_train_mmse, vocab)
 
     df_feature_column = df_feature["feature_no"].tolist()
     x_train = x_train.loc[:, df_feature_column]
     x_test = x_test.loc[:, df_feature_column]
+    return x_train, x_test, y_train_mmse, y_tests_mmse, y_train_dx, y_test_dx
 
-    save_feature(df_feature, "important_audio_feature")
-    rmse, mae, pearson, r2, result = SVR_regression(x_train, x_test, y_train, y_tests)
-    print("rmse")
-    print(rmse)
-    print("MAE")
-    print(mae)
-    print("pearson")
-    print(pearson)
-    print("R2")
-    print(r2)
-    rmse_list["rmse"].append(rmse)
-    rmse_list["MAE"].append(mae)
-    rmse_list["pearson"].append(pearson)
-    rmse_list["r2"].append(r2)
 
-    save_result("adress_fs_poly", 1)
-    save_result("adress_fs_2_poly", 2)
+to_categorical = {'Control': 0,
+                  'Dementia': 1}
+
+
+def linguistic_model():
+    for filename in ["data2020gold.pickle", "data2020fisher.pickle"]:
+        print("#" * 30, filename)
+        data = pd.read_pickle(f'data/{filename}').dropna()
+        data.dx = data.dx.apply(lambda x: to_categorical[x])
+        data.columns = ['speaker',
+                        'transcript_without_tags',
+                        'transcript_without_repetition',
+                        'transcript_without_retracing',
+                        'dx',
+                        'mmse']
+        data_a = data[['speaker', 'transcript_without_tags', 'dx', 'mmse']]
+        data_b = data[['speaker', 'transcript_without_repetition', 'dx', 'mmse']]
+        data_c = data[['speaker', 'transcript_without_retracing', 'dx', 'mmse']]
+        for condition, df in zip(['all_text', 'wo repetition', 'wo retracing'], [data_a, data_b, data_c]):
+            print("#" * 20, condition)
+            df.columns = ['speaker', 'utterances', 'dx', 'mmse']
+            x_train, x_test, train_mmse, test_mmse, train_dx, test_dx = get_ngram_data(df)
+            # save_feature(df_feature, "important_audio_feature")
+            results = Classification(x_train, train_dx, x_test, test_dx)
+            acc, f1, conf = results
+            print("Accuracy: ", acc)
+            print("F1: ", f1)
+            print("Confusion Matrix: \n", conf)
+            # for modelname, acc, f1, conf in results:
+            #     print("#" * 5, modelname)
+            #     print("Accuracy: ", acc)
+            #     print("F1 Score", f1)
+            #     print("Confusion Matrix: \n", conf)
+            # rmse_list["rmse"].append(rmse)
+            # rmse_list["MAE"].append(mae)
+            # rmse_list["pearson"].append(pearson)
+            # rmse_list["r2"].append(r2)
+            #
+            # save_result("adress_fs_poly", 1)
+            # save_result("adress_fs_2_poly", 2)
 
 
 def acoustic_model():
@@ -516,8 +596,41 @@ def _get_labels(_train_results):
     return _result
 
 
-def Classification(x, y, classifier, embedding_only, n_components):
-    classifier.fit(x, y)
+def Classification(xtrain, ytrain, xtest, ytest):
+    lda = LDA()
+    svr = SVC(kernel='linear', C=1, tol=1e-4)
+    dt = tree.DecisionTreeClassifier(criterion='gini', max_leaf_nodes=5)
+    rf = RandomForestClassifier(n_estimators=105, max_depth=5, random_state=0)
+    lda.fit(xtrain, ytrain)
+    svr.fit(xtrain, ytrain)
+    dt.fit(xtrain, ytrain)
+    rf.fit(xtrain, ytrain)
+    lda_pred = lda.predict(xtest)
+    svr_pred = svr.predict(xtest)
+    dt_pred = dt.predict(xtest)
+    rf_pred = rf.predict(xtest)
+    lda_acc = accuracy_score(lda_pred, ytest)
+    svr_acc = accuracy_score(svr_pred, ytest)
+    dt_acc = accuracy_score(dt_pred, ytest)
+    rf_acc = accuracy_score(rf_pred, ytest)
+
+    lda_f1 = f1_score(lda_pred, ytest)
+    svr_f1 = f1_score(svr_pred, ytest)
+    dt_f1 = f1_score(dt_pred, ytest)
+    rf_f1 = f1_score(rf_pred, ytest)
+
+    lda_conf = confusion_matrix(lda_pred, ytest)
+    svr_conf = confusion_matrix(svr_pred, ytest)
+    dt_conf = confusion_matrix(dt_pred, ytest)
+    rf_conf = confusion_matrix(rf_pred, ytest)
+
+    return svr_acc, svr_f1, svr_conf
+
+    # return list(zip(['LDA', 'SVR', 'DT', 'RF'],
+    #                 [lda_acc, svr_acc, dt_acc, rf_acc],
+    #                 [lda_f1, svr_f1, dt_f1, rf_f1],
+    #                 [lda_conf, svr_conf, dt_conf, rf_conf]))
+
     _train_results = {'y_pred': [],
                       'y_test': []}
     scores = None
@@ -753,9 +866,9 @@ def acoustic_model2(embedding_only=False, n_components=1024, option='regression'
     # voting()
 
 
-# linguistic_model()
-acoustic_model2(embedding_only=True)
-acoustic_model2()
+linguistic_model()
+# acoustic_model2(embedding_only=True)
+# acoustic_model2()
 # acoustic_model2(embedding_only=True, option='classification')
 # acoustic_model2(option='classification')
 
